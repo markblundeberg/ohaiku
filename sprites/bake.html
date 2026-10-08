@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="fonts/fonts.css">
+<style>html,body{margin:0;background:transparent}</style></head>
+<body>
+<script src="core.js"></script>
+<script src="chars.js"></script>
+<script src="haiku.js"></script>
+<script src="poses.js"></script>
+<script>
+  window.ready = document.fonts.ready.then(() => Promise.all([...document.fonts].map(f => f.load().catch(() => null))));
+</script>
+</body></html>

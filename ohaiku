@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""ohaiku — Haiku 5.5 chases your cursor. After oneko (Masayuki Koba, 1989) and xneko.
+
+  ohaiku              load up a Haiku (if Haikus are already running, add one more)
+  ohaiku -n 5         load up five
+  ohaiku --opus       load up a chibi Opus instead (she joins the line)
+  ohaiku --quiet      no ding
+  ohaiku --scale 1.3  bigger Haikus (only when starting)
+  ohaiku --quit       send them home
+
+The leader chases the pointer; every other Haiku follows the one in front, so they form a line. They sit when they
+catch up, dance or :3 for a bit, yawn, fall asleep with a nose bubble, and the bubble pops when you move.
+X11 with a compositor (for transparency). Every window is click-through, so they never get in the way.
+"""
+import argparse, json, math, os, random, signal, subprocess, sys, time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+SHARE = os.path.join(HERE, 'share')
+PIDF = os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'ohaiku%s.pid' % os.environ.get('DISPLAY', '').replace(':', '-'))
+HZ = 30
+
+
+def running_pid():
+    try:
+        pid = int(open(PIDF).read())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+class Sheet:
+    _cache = {}
+
+    def __init__(self, name, meta):
+        self.surf = cairo.ImageSurface.create_from_png(os.path.join(SHARE, name + '.png'))
+        self.cell, self.foot, self.cols, self.states = meta['cell'], meta['foot'], meta['cols'], meta['states']
+
+    @classmethod
+    def get(cls, name):
+        if name not in cls._cache:
+            cls._cache[name] = Sheet(name, json.load(open(os.path.join(SHARE, 'sheets.json')))[name])
+        return cls._cache[name]
+
+    def frame(self, state, t):
+        st = self.states[state]
+        f = int(t * st['fps'])
+        f = f % st['n'] if st['loop'] else min(f, st['n'] - 1)
+        return st['start'] + f
+
+    def done(self, state, t):
+        st = self.states[state]
+        return not st['loop'] and t * st['fps'] >= st['n']
+
+
+class Haiku:
+    def __init__(self, app, who, x, y, leader):
+        self.app, self.who, self.leader = app, who, leader
+        self.sheet = Sheet.get(who)
+        self.sc = app.scale
+        self.x, self.y = x, y
+        self.heading = random.choice((-1, 1))
+        self.state, self.t, self.rest, self.extra = 'spawn', 0.0, 0.0, None
+        self.speed = (380 if leader is None else 430) * self.sc
+        self.shown = -1
+        size = int(self.sheet.cell * self.sc)
+        self.size = size
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.set_default_size(size, size); w.resize(size, size)
+        w.set_accept_focus(False)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))   # click-through
+        self.place()
+        w.show_all()
+
+    # -- where it's headed --------------------------------------------------------------------
+    def target(self, cx, cy):
+        if self.leader is None:
+            return cx + 26 * self.sc, cy + self.sheet.foot[1] * .62 * self.sc
+        L = self.leader
+        return L.x - L.heading * self.sheet.cell * .5 * self.sc, L.y
+
+    def set(self, state):
+        if state != self.state: self.state, self.t = state, 0.0
+
+    def step(self, dt, cx, cy, W, H):
+        self.t += dt
+        tx, ty = self.target(cx, cy)
+        tx = min(max(tx, self.size * .3), W - self.size * .3); ty = min(max(ty, self.size * .7), H - 4)
+        dx, dy = tx - self.x, ty - self.y
+        d = math.hypot(dx, dy)
+        s, sh = self.state, self.sheet
+        if s == 'spawn':
+            if sh.done(s, self.t): self.set('idle')
+        elif s.startswith('run'):
+            if d < 3:
+                self.x, self.y = tx, ty; self.rest, self.extra = 0.0, None; self.set('idle')
+            else:
+                k = min(1, self.speed * dt / d)
+                self.x += dx * k; self.y += dy * k
+                if abs(dx) > 2: self.heading = 1 if dx > 0 else -1
+                want = 'runF' if abs(dy) > abs(dx) * 1.4 else ('runR' if dx > 0 else 'runL')
+                if want != s and self.t > .15: self.state = want      # keep the cycle's phase; a little hysteresis
+        elif s in ('idle', 'cat', 'dance'):
+            if d > 14 * self.sc: self.run(dx, dy); return
+            self.rest += dt
+            if s == 'idle' and self.extra is None and self.rest > 3.5:
+                self.extra = random.choice(('dance', 'cat', 'idle')); self.set(self.extra)
+            elif s != 'idle' and self.t > (4.8 if s == 'dance' else 2.5):
+                self.set('idle')
+            elif s == 'idle' and self.rest > 11 + random.random() * 4:
+                self.set('yawn')
+        elif s == 'yawn':
+            if d > 30 * self.sc: self.set('alert')
+            elif sh.done(s, self.t): self.set('sleep')
+        elif s == 'sleep':
+            if d > 40 * self.sc: self.set('wake')
+        elif s == 'wake':
+            if sh.done(s, self.t): self.set('alert')
+        elif s == 'alert':
+            if sh.done(s, self.t) and self.t > .45: self.run(dx, dy)
+
+    def run(self, dx, dy):
+        self.set('runF' if abs(dy) > abs(dx) * 1.4 else ('runR' if dx > 0 else 'runL'))
+
+    # -- drawing --------------------------------------------------------------------------------
+    def place(self):
+        self.win.move(int(self.x - self.sheet.foot[0] * self.sc), int(self.y - self.sheet.foot[1] * self.sc))
+
+    def tick_draw(self):
+        self.place()
+        f = self.sheet.frame(self.state, self.t)
+        if f != self.shown:
+            self.shown = f; self.win.queue_draw()
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        sh, f = self.sheet, max(self.shown, 0)
+        c = sh.cell
+        cr.scale(self.sc, self.sc)
+        cr.set_source_surface(sh.surf, -(f % sh.cols) * c, -(f // sh.cols) * c)
+        cr.get_source().set_filter(cairo.FILTER_GOOD)
+        cr.rectangle(0, 0, c, c); cr.fill()
+        return True
+
+
+class App:
+    def __init__(self, a):
+        self.scale, self.quiet = a.scale, a.quiet
+        self.haikus = []
+        self.unused = list(range(1, 12)); random.shuffle(self.unused)
+        disp = Gdk.Display.get_default()
+        self.pointer = disp.get_default_seat().get_pointer()
+        scr = Gdk.Screen.get_default()
+        if not scr.is_composited():
+            print('ohaiku: no compositor, so the Haikus will have boxes around them', file=sys.stderr)
+        self.raise_t = 0
+        for i in range(a.n): GLib.timeout_add(int(i * 700), self.add, 'opus' if a.opus else None)
+        GLib.timeout_add(1000 // HZ, self.tick)
+        for sig, fn in ((signal.SIGUSR1, lambda: self.add(None)), (signal.SIGUSR2, lambda: self.add('opus')),
+                        (signal.SIGTERM, self.quit), (signal.SIGINT, self.quit)):
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, (lambda f: lambda *_: (f(), True)[1])(fn))
+
+    def screen(self):
+        g = Gdk.Display.get_default().get_monitor_at_point(*self.pointer.get_position()[1:]).get_geometry()
+        return g.x + g.width, g.y + g.height
+
+    def add(self, who=None):
+        if who is None:
+            if not any(h.who == 'haiku00' for h in self.haikus): who = 'haiku00'      # the canonical one comes first
+            else:
+                if not self.unused: self.unused = list(range(1, 12)); random.shuffle(self.unused)
+                who = 'haiku%02d' % self.unused.pop()
+        _, cx, cy = self.pointer.get_position()
+        W, H = self.screen()
+        a = random.uniform(0, 2 * math.pi); r = random.uniform(160, 300) * self.scale
+        x = min(max(cx + r * math.cos(a), 100), W - 100); y = min(max(cy + r * math.sin(a) + 120, 200), H - 10)
+        self.haikus.append(Haiku(self, who, x, y, self.haikus[-1] if self.haikus else None))
+        if not self.quiet:
+            try: subprocess.Popen(['paplay', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
+            except OSError: pass
+        return False
+
+    def tick(self):
+        _, cx, cy = self.pointer.get_position()
+        W, H = self.screen()
+        for h in self.haikus:
+            h.step(1 / HZ, cx, cy, W, H); h.tick_draw()
+        self.raise_t += 1
+        if self.raise_t % (HZ * 2) == 0:          # popups can get buried by newly raised windows; climb back on top
+            for h in self.haikus:
+                gw = h.win.get_window()
+                if gw: gw.raise_()
+        return True
+
+    def quit(self):
+        try: os.unlink(PIDF)
+        except OSError: pass
+        Gtk.main_quit()
+
+
+def main():
+    p = argparse.ArgumentParser(description='Haiku 5.5 chases your cursor.')
+    p.add_argument('-n', type=int, default=1, help='how many to load up')
+    p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
+    p.add_argument('--quiet', action='store_true', help='no ding')
+    p.add_argument('--scale', type=float, default=1.0)
+    p.add_argument('--quit', action='store_true', help='send them home')
+    p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
+    a = p.parse_args()
+    pid = running_pid()
+    if a.quit:
+        if pid: os.kill(pid, signal.SIGTERM)
+        return
+    if pid:                                       # already running: add to the line
+        for i in range(a.n):
+            os.kill(pid, signal.SIGUSR2 if a.opus else signal.SIGUSR1)
+            if i < a.n - 1: time.sleep(.7)
+        return
+    if not a.fg:
+        if os.fork(): return                      # detach, like oneko &
+        os.setsid()
+    open(PIDF, 'w').write('%d\n' % os.getpid())
+    global Gtk, Gdk, GLib, cairo                  # GTK only after the fork
+    import gi
+    gi.require_version('Gtk', '3.0'); gi.require_version('Gdk', '3.0')
+    from gi.repository import Gtk, Gdk, GLib
+    import cairo
+    App(a)
+    Gtk.main()
+
+
+if __name__ == '__main__':
+    main()
