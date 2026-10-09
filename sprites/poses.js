@@ -76,6 +76,21 @@ function ohStates(who) {
       H(g, { t, move: 'bounce', beat: (i - 8) * .125, expr: 'joy' }); g.restore();
     }
   } };
+  // --- recess: leaping between windows, falling off them, riding the pointer ---
+  S.leap = { fps: 12, loop: true, n: 8, f: (g, i) => H(g, { t: i / 12, move: 'freeze', freeze: 1, beat: 0, expr: 'joy' }) };
+  S.fall = { fps: 12, loop: true, n: 8, f: (g, i) => {
+    H(g, { t: i / 12, move: 'freeze', freeze: i % 4 < 2 ? 0 : 1, beat: 0, expr: 'panic' });
+    g.save(); g.strokeStyle = 'rgba(74,44,28,.55)'; g.lineWidth = 5; g.lineCap = 'round';
+    for (let k = 0; k < 4; k++) { const x = -70 + k * 46 + (i % 2) * 6; g.beginPath(); g.moveTo(x, -330 + (k % 2) * 16); g.lineTo(x, -390 + (k % 2) * 16); g.stroke(); }
+    g.restore();
+  } };
+  S.surf = { fps: 12, loop: true, n: 16, f: (g, i) => {
+    const sw = Math.sin(i / 16 * Math.PI * 2);
+    g.save(); g.rotate(.06 * sw);
+    ohArrowBoard(g, 0, 0);
+    H(g, { t: i / 12, move: 'idle', beat: 0, expr: 'joy', arms: [[56, -6 + 10 * sw, 0], [56, -6 - 10 * sw, 0]] }, 0, -22);
+    g.restore();
+  } };
   // --- agent work: what the session is doing right now ---
   const beatAt = (i, step = .125) => i * step;
   S.think = { fps: 13.33, loop: true, n: 32, f: (g, i) => {
@@ -95,6 +110,16 @@ function ohStates(who) {
   } };
   S.done = { fps: 13.33, loop: true, n: 16, f: (g, i) => H(g, { t: i / 13.33, move: 'bounce', beat: beatAt(i), expr: 'joy' }) };
   return S;
+}
+// the pointer as a surfboard (BLISS's "Cursor is now connected"): an XP-ish white arrow lying under the feet,
+// its tip at the left end (where the real pointer's tip will be)
+function ohArrowBoard(g, x, y) {
+  g.save(); g.translate(x, y - 6);
+  const P = [[-120, 0], [-40, -26], [-46, -10], [110, -14], [112, 10], [-46, 12], [-40, 28]];
+  g.fillStyle = 'rgba(0,0,0,.18)'; g.beginPath(); g.ellipse(0, 26, 110, 10, 0, 0, 7); g.fill();
+  g.beginPath(); P.forEach(([a, b], k) => k ? g.lineTo(a, b) : g.moveTo(a, b)); g.closePath();
+  g.fillStyle = '#ffffff'; g.fill(); g.lineWidth = 6; g.strokeStyle = '#111'; g.lineJoin = 'round'; g.stroke();
+  g.restore();
 }
 // a thought cloud with dots that fill in one by one
 function ohThink(g, x, y, u) {

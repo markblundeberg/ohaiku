@@ -5,8 +5,10 @@
   ohaiku --agents     start with just the agents (for autostart)
   ohaiku -n 5         load up five
   ohaiku --opus       load up a chibi Opus
-  ohaiku --play       everyone chases the pointer in a line
-  ohaiku --perch      everyone back to the bottom edge, out of the way (the default)
+  ohaiku --perch      everyone on the bottom edge, out of the way (the default)
+  ohaiku --follow     everyone chases the pointer in a line (oneko); --play does the same
+  ohaiku --recess     they play on your windows: climb onto title bars, hop between them, ride along, fall off
+  ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
   ohaiku --quit       Haikus, go home;  --restart  go home and come back (agents only)
@@ -86,6 +88,9 @@ class Chibi:
         self.wander = 0.0; self.wander_at = random.uniform(6, 14)
         self.duck = 0.0
         self.shown, self.gone = None, False
+        self.shrink, self.spin = 1.0, 0.0                 # the vacuum ("Nothing! Studying!")
+        self.on, self.off, self.arc, self.vy, self.falling = None, 0.0, None, 0.0, False   # recess: which window top
+        self.next_hop, self.goal, self.settled = None, None, False
         self.W = self.cpx + 40 if label else self.cpx
         self.H = self.cpx + (LABEL_H if label else 0)
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
@@ -173,7 +178,7 @@ class Chibi:
         d = math.hypot(dx, dy)
         want = self.work()
         if s == 'sleep':
-            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.agent is None): self.set('wake')
+            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.agent is None or self.app.mode == 'recess'): self.set('wake')
             return
         if s == 'wake':
             if self.done_anim(): self.set('alert')
@@ -227,7 +232,7 @@ class Chibi:
     def tick_draw(self):
         self.place()
         if self.label and getattr(self, 'calling', None) is not None and self.calling != (self.agent.state == 'ask'): self.shape_input()
-        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None)
+        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None, round(self.shrink, 2))
         if key != self.shown:
             self.shown = key; self.win.queue_draw()
 
@@ -237,6 +242,9 @@ class Chibi:
         c, f = self.m['cell'], self.frame()
         floor = self.foot
         cr.save()
+        if self.shrink < 1:                                                 # being vacuumed into the tray
+            cr.translate(self.W / 2, floor - self.cpx * .35); cr.rotate(self.spin); cr.scale(self.shrink, self.shrink)
+            cr.translate(-self.W / 2, -(floor - self.cpx * .35))
         cr.rectangle(0, 0, self.W, floor + 2 * self.sc); cr.clip()         # ducking: sink below the edge
         cr.translate((self.W - self.cpx) / 2, self.duck * self.cpx * .72)
         cr.scale(self.sc, self.sc)
@@ -244,7 +252,7 @@ class Chibi:
         cr.get_source().set_filter(cairo.FILTER_GOOD)
         cr.rectangle(0, 0, c, c); cr.fill()
         cr.restore()
-        if self.label: self.draw_label(cr, floor)
+        if self.label and self.shrink > .98 and self.state not in ('leap', 'fall'): self.draw_label(cr, floor)
         return True
 
     def draw_label(self, cr, floor):
@@ -272,12 +280,15 @@ class App:
             print('ohaiku: no compositor, so the Haikus will have boxes around them', file=sys.stderr)
         self.tk = 0
         self.show_agents = not a.no_agents
+        self.surfaces, self.world_ok = [], True
+        self.shake, self.studying, self.peeker = [], None, None
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, lambda *_: (self.quit(), True)[1])
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, lambda *_: (self.quit(), True)[1])
         threading.Thread(target=self.watch, daemon=True).start()
+        threading.Thread(target=self.watch_world, daemon=True).start()
         self.tray()
 
     # -- background watchers: the agents, and whether music is playing ----------------------------------
@@ -294,6 +305,23 @@ class App:
                 last_music = time.time(); m = self.listen()
                 if m != self.music: GLib.idle_add(self.set_music, m)
             time.sleep(1.5)
+
+    def watch_world(self):
+        try:
+            import world
+            W = world.Surfaces()
+        except Exception as e:
+            print('ohaiku: no recess (python-xlib?):', e, file=sys.stderr); self.world_ok = False; return
+        while True:
+            if self.mode == 'recess' and not self.hidden:
+                try: GLib.idle_add(self.set_surfaces, W.poll())
+                except Exception as e: print('ohaiku: world:', e, file=sys.stderr)
+                time.sleep(.12)
+            else:
+                time.sleep(.5)
+
+    def set_surfaces(self, s):
+        self.surfaces = s; return False
 
     def set_music(self, m):
         self.music = m and self.music_on; return False
@@ -375,7 +403,7 @@ class App:
             c.slot = x - w / 2; x -= w
 
     def targets(self, cx, cy):
-        if self.mode == 'play':
+        if self.mode == 'follow':
             prev = None
             for c in self.order():
                 if prev is None: yield c, cx + 26 * c.sc, cy + c.foot * .62
@@ -388,9 +416,18 @@ class App:
 
     def tick(self):
         _, cx, cy = self.pointer.get_position()
+        dt = 1 / HZ
+        if self.studying is not None: self.study_tick(dt); return True
+        self.detect_shake(cx)
+        fl = self.floor()
         for c, tx, ty in list(self.targets(cx, cy)):
-            c.step(1 / HZ, tx, ty)
-            near = self.mode == 'perch' and abs(cx - c.x) < c.cpx * .45 + 30 and c.y - c.foot - 30 < cy < c.y + 40
+            if c.arc or c.falling: self.air(c, dt)
+            elif self.mode == 'recess' and c.state != 'spawn': self.recess(c, dt, fl)
+            else:
+                if self.mode == 'perch' and c.y < fl - 6 and c.state != 'spawn':     # up on a window: jump down home
+                    self.leap(c, c.slot, fl, None)
+                else: c.step(dt, tx, ty)
+            near = self.mode != 'follow' and abs(cx - c.x) < c.cpx * .45 + 30 and c.y - c.foot - 30 < cy < c.y + 40
             c.duck += (float(near) - c.duck) * min(1, 8 / HZ)
             if c.duck < .01: c.duck = 0
             c.tick_draw()
@@ -408,6 +445,132 @@ class App:
         return True
 
     def everyone(self): return list(self.agents.values()) + self.pets
+
+    # -- recess: the windows are the playground ------------------------------------------------------------
+    def surface(self, sid):
+        return next((s for s in self.surfaces if s.id == sid), None)
+
+    def leap(self, c, x1, y1, sid):
+        d = math.hypot(x1 - c.x, y1 - c.y)
+        c.arc = dict(x0=c.x, y0=c.y, x1=x1, y1=y1, sid=sid, t=0.0, T=.45 + d / 1400, h=60 + .25 * d)
+        c.goal = None; c.set('leap')
+
+    def land(self, c, sid, y):
+        c.arc, c.falling, c.vy = None, False, 0.0
+        c.on, c.y = sid, y
+        s = self.surface(sid) if sid else None
+        c.off = c.x - s.x0 if s else 0.0
+        c.rest, c.extra = 0.0, None; c.set('idle')
+
+    def air(self, c, dt):
+        fl = self.floor()
+        if c.arc:
+            A = c.arc; A['t'] += dt; k = min(1, A['t'] / A['T'])
+            c.x = A['x0'] + (A['x1'] - A['x0']) * k
+            c.y = A['y0'] + (A['y1'] - A['y0']) * k - A['h'] * 4 * k * (1 - k)
+            if A['x1'] != A['x0']: c.heading = 1 if A['x1'] > A['x0'] else -1
+            c.t += dt
+            if k >= 1:
+                s = self.surface(A['sid']) if A['sid'] else None
+                if A['sid'] and (s is None or not s.stands(c.x)): c.arc = None; c.falling = True; c.set('fall')
+                else: self.land(c, A['sid'], s.y if s else fl)
+            return
+        c.vy += 2600 * dt; ny = c.y + c.vy * dt; c.t += dt
+        for s in (self.surfaces if self.mode == 'recess' else []):
+            if s.stands(c.x) and c.y <= s.y <= ny: self.land(c, s.id, s.y); return
+        if ny >= fl: self.land(c, None, fl); return
+        c.y = ny
+
+    def recess(self, c, dt, fl):
+        wa = self.workarea()
+        s = self.surface(c.on) if c.on else None
+        if c.on and (s is None or not s.stands(c.x)):                   # its window moved away, closed, or got covered
+            c.on = None; c.falling, c.vy = True, -250.0; c.set('fall'); return
+        if s: c.x, c.y = s.x0 + c.off, s.y                              # ride along when the window moves
+        else: c.y = fl
+        now = time.time()
+        free = c.work() is None
+        if c.next_hop is None: c.next_hop = now + random.uniform(.3, 3)
+        if now > c.next_hop and c.state not in ('sleep', 'yawn', 'wake', 'alert') and (free or not c.settled):
+            c.settled = True
+            c.next_hop = now + (random.uniform(5, 14) if free else 1e12)
+            spots = [x for x in self.surfaces if x.y > wa.y + c.cpx * .9]
+            if spots and random.random() < .8:
+                t = random.choice(spots); a, b = random.choice(t.segs); x = random.uniform(a + 30, b - 30); y, sid = t.y, t.id
+            else:
+                x, y, sid = random.uniform(wa.x + 60, wa.x + wa.width - 60), fl, None
+            if sid == c.on and abs(x - c.x) < 500: c.goal = x
+            else: self.leap(c, x, y, sid); return
+        tx = c.goal if c.goal is not None else c.x
+        c.step(dt, tx, c.y)
+        if c.goal is not None and abs(c.x - c.goal) < 3: c.goal = None
+        if s: c.off = c.x - s.x0
+
+    # -- "Nothing! Studying!": shake the mouse and they're all vacuumed into the tray --------------------------
+    def detect_shake(self, cx):
+        now = time.time()
+        self.shake.append((now, cx)); self.shake = [p for p in self.shake if now - p[0] < .7]
+        flips, last = 0, 0
+        for (t0, x0), (t1, x1) in zip(self.shake, self.shake[1:]):
+            dx = x1 - x0
+            if abs(dx) < 14: continue
+            sg = 1 if dx > 0 else -1
+            if last and sg != last: flips += 1
+            last = sg
+        if flips >= 5 and not self.hidden and self.everyone(): self.study()
+
+    def tray_point(self):
+        try:
+            ok, scr, area, orient = self.icon.get_geometry()
+            if ok and area.width > 1 and (area.x > 0 or area.y > 0): return area.x + area.width / 2, area.y + area.height / 2
+        except Exception: pass
+        wa = self.workarea(); return wa.x + wa.width - 30, wa.y + wa.height + 10
+
+    def study(self):
+        if self.studying is not None: return
+        self.studying = 0.0; self.shake = []
+        self.vac_to = self.tray_point()
+        for c in self.everyone():
+            c.arc, c.falling, c.goal = None, False, None
+            c.vac_from = (c.x, c.y); c.vac_delay = random.uniform(0, .12)
+        if not self.quiet:
+            try: subprocess.Popen(['paplay', os.path.join(HERE, 'studying.wav')], stderr=subprocess.DEVNULL)
+            except OSError: pass
+
+    def study_tick(self, dt):
+        t0 = self.studying; t = self.studying = t0 + dt
+        tx, ty = self.vac_to
+        if t0 < .5:
+            for c in self.everyone():
+                k = min(1, max(0, (t - c.vac_delay) / .36)); kk = k * k
+                c.x = c.vac_from[0] + (tx - c.vac_from[0]) * kk
+                c.y = c.vac_from[1] + (ty + c.foot * .3 - c.vac_from[1]) * kk
+                c.shrink = max(.04, 1 - kk); c.spin = kk * 7 * (1 if c.heading > 0 else -1)
+                c.set('fall'); c.t += dt; c.tick_draw()
+            if t >= .5:                                   # slam: all gone
+                for c in self.pets: c.win.destroy()
+                self.pets = []
+                fl = self.floor()
+                for c in self.agents.values():
+                    c.win.hide(); c.shrink, c.spin = 1.0, 0.0
+                    c.x, c.y, c.on, c.next_hop, c.settled = c.slot, fl, None, None, False; c.set('idle')
+                self.hidden, self.mode = True, 'perch'; self.sync_menu()
+        elif t >= 3.0 and self.peeker is None:            # ...one peeks back out, and dings
+            wa = self.workarea()
+            self.peeker = Chibi(self, 'haiku00', max(wa.x + 60, min(tx - 50, wa.x + wa.width - 60)), self.floor())
+            self.peeker.duck = 1.0; self.peeker.set('cat'); self.peeker.win.show_all()
+            self.dinged = False
+        elif self.peeker is not None:
+            P = self.peeker; P.t += dt; u = t - 3.0
+            P.duck = 1 - .62 * min(1, u / .25) if u < 1.6 else .38 + .62 * min(1, (u - 1.6) / .25)
+            if u > .2 and not self.dinged:
+                self.dinged = True
+                if not self.quiet:
+                    try: subprocess.Popen(['paplay', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
+                    except OSError: pass
+            P.tick_draw()
+            if u > 1.9:
+                P.win.destroy(); self.peeker = None; self.studying = None
 
     def focus(self, c):
         """raise the terminal window this session runs in (Claude Code titles it after the session); else Claude Desktop"""
@@ -441,9 +604,10 @@ class App:
             item('Go to %s' % (c.agent.name if c.agent.kind == 'session' else 'its session'), lambda: self.focus(c))
             item('Send away until needed', lambda: self.dismiss(c))
             m.append(Gtk.SeparatorMenuItem())
-        item('Play (chase the pointer)', lambda: self.set_mode('play'))
         item('Perch (out of the way)', lambda: self.set_mode('perch'))
-        item('Hide everyone', lambda: self.set_mode('hide'))
+        item('Follow (chase the pointer)', lambda: self.set_mode('follow'))
+        item('Recess (play on the windows)', lambda: self.set_mode('recess'))
+        item('Nothing! Studying!', self.study)
         item('Load Up Haiku', self.add_pet)
         m.append(Gtk.SeparatorMenuItem())
         item('Haikus, Go Home', self.quit)
@@ -485,6 +649,10 @@ class App:
             self.hidden = False
             for c in self.everyone(): c.win.show_all()
         else:
+            if m == 'play': m = 'follow'
+            if m == 'recess' and not self.world_ok: m = 'perch'
+            for c in self.everyone(): c.next_hop, c.settled, c.goal = None, False, None
+            if self.mode == 'recess' and m != 'recess': self.surfaces = []
             self.mode = m
             if self.hidden: self.set_mode('show')
         self.sync_menu()
@@ -497,7 +665,8 @@ class App:
         for c in cmds:
             if c == 'pet': self.add_pet()
             elif c == 'opus': self.add_pet('opus%d' % random.randrange(8))
-            elif c in ('play', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
+            elif c in ('play', 'follow', 'recess', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
+            elif c == 'studying': self.study()
 
     # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
     def tray(self):
@@ -515,10 +684,12 @@ class App:
         item('Load Up Opus', lambda: self.add_pet('opus%d' % random.randrange(8)))
         m.append(Gtk.SeparatorMenuItem())
         grp = None
-        for key, label in (('play', 'Play (chase the pointer)'), ('perch', 'Perch (out of the way)'), ('hide', 'Hide')):
+        for key, label in (('perch', 'Perch (out of the way)'), ('follow', 'Follow (chase the pointer)'),
+                           ('recess', 'Recess (play on the windows)'), ('hide', 'Hide')):
             r = Gtk.RadioMenuItem.new_with_label_from_widget(grp, label); grp = grp or r
             r.connect('toggled', lambda w, k=key: (not self.menu_lock and w.get_active()) and self.set_mode(k))
             m.append(r); self.radios[key] = r
+        item('Nothing! Studying!  (or shake the mouse)', self.study)
         m.append(Gtk.SeparatorMenuItem())
         ck = Gtk.CheckMenuItem(label='Dance Only When Music Plays'); ck.set_active(True)
         ck.connect('toggled', lambda w: (setattr(self, 'music_on', w.get_active()), setattr(self, 'music', False)))
@@ -529,7 +700,7 @@ class App:
         item('Haikus, Go Home', self.quit)
         m.show_all()
         self.icon.connect('popup-menu', lambda i, b, t: m.popup(None, None, Gtk.StatusIcon.position_menu, i, b, t))
-        self.icon.connect('activate', lambda *_: self.set_mode('play' if self.mode == 'perch' else 'perch'))
+        self.icon.connect('activate', lambda *_: self.set_mode('show') if self.hidden else self.set_mode('recess' if self.mode == 'perch' else 'perch'))
         self.icon.connect('button-press-event', lambda i, ev: ev.button == 2 and (self.set_mode('toggle') or True))
         self.sync_menu()
 
@@ -551,14 +722,14 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'perch', 'hide', 'show', 'toggle'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'follow', 'recess', 'perch', 'hide', 'show', 'toggle', 'studying'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'perch', 'hide', 'show', 'toggle') if getattr(a, m)]
+    modes = [m for m in ('play', 'follow', 'recess', 'perch', 'hide', 'show', 'toggle', 'studying') if getattr(a, m)]
     pid = running_pid()
     if a.quit or a.restart:
         if pid:
@@ -587,7 +758,7 @@ def main():
     import cairo
     sys.path.insert(0, HERE)
     app = App(a)
-    for m in modes: app.set_mode(m)
+    for m in modes: app.study() if m == 'studying' else app.set_mode(m)
     Gtk.main()
 
 

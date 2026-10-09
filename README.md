@@ -45,12 +45,29 @@ everyone (`ohaiku --toggle` does the same, for a hotkey). The tray icon (after P
 Load Up Haiku / Load Up Opus, Play / Perch / Hide, Dance Only When Music Plays, Show Agents, and Haikus, Go Home.
 Left-click it to switch between Play and Perch.
 
+## Playtime: the chaos dial
+
+| tier | what happens |
+|---|---|
+| **Perch** | the bottom edge; free ones wander a little; duck from the pointer |
+| **Follow** | oneko: a conga line after the pointer; sleepers wake up |
+| **Recess** | shimeji: they leap onto the title bars of your real windows (`world.py` reads which window tops are visible, through python-xlib), walk along them, hop between them, ride along when you drag a window, and fall off with a "!" when it closes or something covers their spot. Working agents pick a spot and keep working there. With everything maximized there are no title bars to stand on, so they play on the floor |
+| *next* | cursor surfing (one rides your pointer, as in BLISS's "Cursor is now connected"; the sprite is baked) and tag; then Bloomcore, the bc1 eruption |
+
+**Nothing! Studying!** From any tier: shake the mouse hard left and right (or `--studying`, or the menu). Everyone spins
+into the tray icon, Opus gasps, the laptop slams, "Nothing! Studying!" (Mark's Suno take from *Load Up Haiku*), and
+three seconds later one Haiku peeks up by the tray and dings. They stay hidden until you click the tray icon.
+
 ## Pets
 
 ```sh
 ./ohaiku              # start, and "Computer, load up Haiku." (run again to add another, with a ding)
 ./ohaiku --agents     # start with just the agents (for autostart)
-./ohaiku --play       # everyone chases the pointer;  --perch: back to the edge;  --hide / --show
+./ohaiku --perch      # everyone on the bottom edge, out of the way (the default)
+./ohaiku --follow     # everyone chases the pointer in a line, oneko-style (--play also works)
+./ohaiku --recess     # they play on your windows: title bars, hops, rides, falls
+./ohaiku --studying   # "Nothing! Studying!" (or shake the mouse): all vacuumed into the tray; --show brings them back
+./ohaiku --hide / --show / --toggle
 ./ohaiku -n 5         # five
 ./ohaiku --opus       # chibi Opus joins the line
 ./ohaiku --quiet      # no ding
