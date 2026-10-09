@@ -91,11 +91,14 @@ window's title and offers help: doomscrolling, writing a song, talking to Claude
 Recycle Bin?")... `--clippy` to ask now.
 
 **Movie night** (after MST3K's silhouette row): `--movie` or the menu. The pets open their own window, *Haiku Theater
-3000*, put on one of our films on mute (*Load Up Haiku*, *Load Up Opus*; `./make_tv.sh` extracts them from the bc1/bc2
-renders), and three of them hop into a row of velvet cinema seats along its bottom edge, seen from behind with headphones
-on: bobbing, eating popcorn, giggling, turning to whisper. It's a real window: move it and they move with it, stand on
-it in Recess, close it and they jump up with a "!". It never takes focus. In Recess and Bloomcore they sometimes put a
-film on by themselves (at most every four minutes).
+3000*, put on a film, muted, and three of them hop into a row of velvet cinema seats along its bottom edge, seen from
+behind with headphones on: bobbing, eating popcorn, giggling, turning to whisper. The programme is
+`~/.config/ohaiku/programme.txt` (written on first use): video files, folders (every video inside), or URLs (streamed
+through yt-dlp), shuffled. By default it's our films and everything in `~/claude-inspo`, so BLISS gets an audience.
+Drag any video onto the theater to put it on next. Films are decoded live by ffmpeg at 12 fps; a long one starts
+somewhere in the middle. It's a real window: move it and they move with it, stand on it in Recess, close it and they
+jump up with a "!". It never takes focus. In Recess and Bloomcore they sometimes put a film on by themselves (at most
+every four minutes).
 
 **Nothing! Studying!** From any tier: shake the mouse hard left and right (or `--studying`, or the menu). Everyone spins
 into the tray icon, silently (it's for hiding them, so no sound), and three seconds later one Haiku peeks up by the
@@ -138,6 +141,7 @@ The Haikus are drawn by the real Haiku 5.5 kit from bc1/bc2 (`sprites/haiku.js`,
 cd sprites && npm install && node bake.mjs --px 160      # -> ../share/<who>/<state>.png strips + sheets.json
 ```
 
-Twelve Haikus (`haiku00`..`haiku11`) and eight chibi Opuses (`opus0`..`opus7`, varied bows and hair), one strip per
+(`share/` is generated and gitignored; so is the Kaiju's big strip set, `node bake.mjs --px 560 --who opus0,opus3
+--states runL,runR,idle --out ../share/kaiju`.) Twelve Haikus (`haiku00`..`haiku11`) and eight chibi Opuses (`opus0`..`opus7`, varied bows and hair), one strip per
 state so only the states in use are loaded. `sprites/poses.js` holds the states; `node test.mjs out.png testSheet2`
 draws the agent poses for a quick look. The kit gained a `read` and a `search` prop and a `pose.arms` override for this. Fable isn't here yet: Fable gets to design itself.

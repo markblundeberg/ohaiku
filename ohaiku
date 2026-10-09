@@ -11,8 +11,10 @@
   ohaiku --tag        one Haiku surfs your pointer; the rest run from it; touch one and it's It
   ohaiku --bloomcore  the bc1 eruption: ten more Haikus burst out of the tray, everyone dances on the windows,
                       and a flower opens wherever one lands
-  ohaiku --movie      movie night: they open a window, put on one of our films (muted), and watch it from a row
-                      of cinema seats, headphones on. In Recess and Bloomcore they sometimes do this by themselves
+  ohaiku --movie      movie night: they open a window, put on a film (muted), and watch it from a row of cinema
+                      seats, headphones on. The programme is ~/.config/ohaiku/programme.txt (files, folders, URLs);
+                      drag a video onto the theater to put it on next. In Recess and Bloomcore they sometimes do this
+                      by themselves
   ohaiku --lemmings   "Let's go!": ten Haikus drop from a trapdoor over your windows and march for the flower door.
                       Click one to build (Q.E.D. bricks), middle-click to float (dandelion), right-click to block.
                       If you don't play, a director does.  --ohno nukes them ("Oh no!")
@@ -615,58 +617,137 @@ CLIPPY = [   # (window-title pattern, the balloon)
 ]
 
 
+PROGRAMME = os.path.expanduser('~/.config/ohaiku/programme.txt')
+PROGRAMME_DEFAULT = """# Haiku Theater 3000's programme. One per line: a video file, a folder (every video in it), or a URL (streamed
+# with yt-dlp). Played muted, in random order. You can also drag a video onto the theater window to put it on next.
+~/git/bc1/out/bloomcore_v6.mp4
+~/git/bc2/out/bc2_v1.mp4
+~/claude-inspo
+"""
+VIDEO_EXT = ('.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v', '.gif')
+
+
+def programme():
+    if not os.path.exists(PROGRAMME):
+        os.makedirs(os.path.dirname(PROGRAMME), exist_ok=True); open(PROGRAMME, 'w').write(PROGRAMME_DEFAULT)
+    out = []
+    for ln in open(PROGRAMME):
+        ln = ln.strip()
+        if not ln or ln.startswith('#'): continue
+        if '://' in ln: out.append(ln); continue
+        p = os.path.expanduser(ln)
+        if os.path.isdir(p):
+            for root, _, files in os.walk(p):
+                out += [os.path.join(root, f) for f in files if f.lower().endswith(VIDEO_EXT)]
+        elif os.path.exists(p): out.append(p)
+    return out
+
+
+class Reel:
+    """one film, decoded by ffmpeg into a queue of 12 fps frames (muted); URLs go through yt-dlp first"""
+    W, H = 448, 252
+
+    def __init__(self, src):
+        import queue
+        self.src, self.q, self.done, self.procs = src, queue.Queue(maxsize=36), False, []
+        self.name = src if '://' in src else os.path.splitext(os.path.basename(src))[0]
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        vf = 'fps=12,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black' % (self.W, self.H, self.W, self.H)
+        ff = ['ffmpeg', '-v', 'error', '-nostdin']
+        try:
+            if '://' in self.src:
+                yt = subprocess.Popen(['yt-dlp', '-q', '-f', 'best[height<=480]/best', '-o', '-', self.src],
+                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                self.procs.append(yt); ff += ['-i', '-']; stdin = yt.stdout
+            else:
+                try:
+                    dur = float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', self.src],
+                                               capture_output=True, text=True, timeout=5).stdout.strip() or 0)
+                except (ValueError, subprocess.SubprocessError): dur = 0
+                if dur > 360: ff += ['-ss', '%.1f' % random.uniform(0, dur - 300)]      # a long one: drop in somewhere
+                ff += ['-i', self.src]; stdin = subprocess.DEVNULL
+            pr = subprocess.Popen(ff + ['-an', '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'bgra', '-'], stdin=stdin,
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            self.procs.append(pr)
+            n = self.W * self.H * 4
+            while True:
+                buf = pr.stdout.read(n)
+                if len(buf) < n: break
+                self.q.put(buf)
+        except OSError:
+            pass
+        self.done = True
+
+    def stop(self):
+        for p in self.procs:
+            try: p.kill()
+            except OSError: pass
+        self.done = True
+
+
 class Theater:
-    """Movie night: the pets' own window, playing our films on mute (after MST3K, they sit in a row in front of it)"""
+    """Movie night: the pets' own window, playing films on mute (after MST3K, they sit in a row in front of it)"""
 
     def __init__(self, app, x, y):
-        self.app, self.t = app, 0.0
-        root = os.path.join(SHARE, 'tv')
-        self.reels = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))) if os.path.isdir(root) else []
-        random.shuffle(self.reels)
-        self.ri, self.frames, self.shown, self.pix = 0, [], None, None
+        self.app, self.t, self.reel, self.surf, self.queue_next = app, 0.0, None, None, []
+        self.reels = programme(); random.shuffle(self.reels); self.ri = 0
         w = self.win = Gtk.Window(title='Haiku Theater 3000')
         w.set_accept_focus(False); w.set_focus_on_map(False)
-        self.area = Gtk.DrawingArea(); self.area.set_size_request(448, 252); w.add(self.area)
+        self.area = Gtk.DrawingArea(); self.area.set_size_request(Reel.W, Reel.H); w.add(self.area)
         self.area.connect('draw', self.draw)
         w.connect('delete-event', lambda *_: (app.theater_closed(), False)[1])
+        w.drag_dest_set(Gtk.DestDefaults.ALL, [], Gdk.DragAction.COPY); w.drag_dest_add_uri_targets()
+        w.connect('drag-data-received', self.dropped)
         w.move(int(x), int(y))
-        self.load()
+        self.next()
         if not app.hidden and not app.locked: self.show()
 
     def show(self):
-        # opened without taking focus, so the window manager would tuck it under your active window; put it on top
         # (raise_() is ignored for a window that never had focus; a moment of keep-above lifts it without focus)
         self.win.show_all()
         self.win.set_keep_above(True)
         GLib.timeout_add(400, lambda: (self.win.set_keep_above(False), False)[1])
 
-    def load(self):
-        if not self.reels: self.frames = []; return
-        name = self.reels[self.ri % len(self.reels)]
-        d = os.path.join(SHARE, 'tv', name)
-        self.frames = sorted(os.path.join(d, f) for f in os.listdir(d))
-        self.win.set_title('Haiku Theater 3000 \u2014 %s.mp4 (muted)' % name)
-        self.t = 0.0
+    def dropped(self, w, ctx, x, y, data, info, t):
+        from urllib.parse import unquote, urlparse
+        for u in data.get_uris():
+            p = unquote(urlparse(u).path) if u.startswith('file://') else u
+            self.queue_next.append(p)
+        self.next()
+
+    def next(self):
+        if self.reel: self.reel.stop()
+        if self.queue_next: src = self.queue_next.pop(0)
+        elif self.reels: src = self.reels[self.ri % len(self.reels)]; self.ri += 1
+        else: self.reel = None; self.win.set_title('Haiku Theater 3000 \u2014 (nothing on: add films to %s)' % PROGRAMME); return
+        self.reel = Reel(src); self.t = 0.0
+        self.win.set_title('Haiku Theater 3000 \u2014 %s (muted)' % self.reel.name)
 
     def tick(self, dt):
         self.t += dt
-        if not self.frames: return
-        f = int(self.t * 12)
-        if f >= len(self.frames):
-            self.ri += 1; self.load(); f = 0
-        if f != self.shown:
-            self.shown = f
-            try: self.pix = GdkPixbuf.Pixbuf.new_from_file(self.frames[f])
-            except Exception: self.pix = None
-            self.area.queue_draw()
+        R = self.reel
+        if not R: return
+        if self.t >= 1 / 12:
+            self.t = 0.0
+            try:
+                buf = R.q.get_nowait()
+                self.surf = cairo.ImageSurface.create_for_data(bytearray(buf), cairo.FORMAT_ARGB32, Reel.W, Reel.H, Reel.W * 4)
+                self.area.queue_draw()
+            except Exception:
+                if R.done and R.q.empty(): self.next()
+
+    def close(self):
+        if self.reel: self.reel.stop()
 
     def draw(self, w, cr):
         W, H = w.get_allocated_width(), w.get_allocated_height()
         cr.set_source_rgb(0, 0, 0); cr.paint()
-        if self.pix:
-            k = min(W / self.pix.get_width(), H / self.pix.get_height())
-            cr.translate((W - self.pix.get_width() * k) / 2, (H - self.pix.get_height() * k) / 2); cr.scale(k, k)
-            Gdk.cairo_set_source_pixbuf(cr, self.pix, 0, 0); cr.paint()
+        if self.surf:
+            k = min(W / Reel.W, H / Reel.H)
+            cr.translate((W - Reel.W * k) / 2, (H - Reel.H * k) / 2); cr.scale(k, k)
+            cr.set_source_surface(self.surf, 0, 0); cr.paint()
         return True
 
     def seats(self, n):
@@ -1031,7 +1112,6 @@ class App:
     # -- movie night ----------------------------------------------------------------------------------------
     def movie(self):
         if self.theater: self.theater.win.close(); return
-        if not os.path.isdir(os.path.join(SHARE, 'tv')): print('ohaiku: no films; run make_tv.sh', file=sys.stderr); return
         wa = self.workarea()
         x = wa.x + 60 + random.uniform(0, max(1, wa.width * .5 - 500))
         y = wa.y + wa.height - 252 - 150 - random.uniform(0, max(1, wa.height * .3))
@@ -1051,6 +1131,7 @@ class App:
         self.layout()
 
     def theater_closed(self):
+        if self.theater: self.theater.close()
         self.theater = None
         for c in self.audience:                        # "!" and back to whatever everyone else is doing
             c.arc, c.seated = None, False; c.set('alert'); self.pets.append(c)
@@ -1459,7 +1540,7 @@ class App:
                 for c in self.pets: c.win.destroy()
                 for f in self.flowers: f.win.destroy()
                 for c in self.audience: c.win.destroy()
-                if self.theater: self.theater.win.destroy(); self.theater = None
+                if self.theater: self.theater.close(); self.theater.win.destroy(); self.theater = None
                 self.toggle_snow(False)
                 self.lemmings_end()
                 for f in self.flyers: f.win.destroy()
@@ -1672,6 +1753,7 @@ class App:
         self.menu_lock = False
 
     def quit(self):
+        if self.theater: self.theater.close()
         try: os.unlink(PIDF)
         except OSError: pass
         Gtk.main_quit()
