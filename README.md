@@ -56,6 +56,7 @@ Left-click it to switch between Play and Perch.
 ./ohaiku --quiet      # no ding
 ./ohaiku --scale 1.3  # bigger (when starting)
 ./ohaiku --quit       # Haikus, go home
+./ohaiku --restart    # go home and come back (agents only), e.g. after a git pull
 ./install.sh          # adds "Load Up Haiku" / "Haikus, Go Home" to the menu
 ```
 
