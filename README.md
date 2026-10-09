@@ -27,10 +27,12 @@ what it's doing:
 Any tool not in the table does the arm-pump and is written to `~/.cache/ohaiku/unknown-tools.txt`: that's the list of
 drawings still to make (add a state in `sprites/poses.js`, map it in `TOOL_POSE` in `ohaiku`, rebake).
 
-How it knows: `agents.py` reads the tails of the transcripts in `~/.claude/projects/` (read-only; it changes nothing in
-Claude Code). One honest limit: a tool call is only written to the transcript when it finishes, so while a long tool runs
-the chibi shows the last tool used, and a tool waiting for your permission looks like a tool running. Claude Code hooks
-could report both exactly; that would mean adding hooks to `~/.claude/settings.json`, so it isn't done.
+How it knows: `agents.py` reads the tails of the transcripts in `~/.claude/projects/` and the live records in
+`~/.claude/sessions/<pid>.json` (read-only; it changes nothing in Claude Code). The live record says `busy` or `idle`
+right now and whether the process is still running, so a session that's open shows up however long it has been quiet, and
+one you close leaves. A tool call is only written to the transcript when it finishes, so while a long tool runs the chibi
+shows the last tool used (busy, so never mistaken for idle). Sessions without a live record (Claude Desktop) fall back to
+the transcripts alone.
 
 New pets announce themselves in an XP-style balloon: *Found New Hardware: Haiku 5.5. Your new Haiku is installed and
 ready to use.* While the screen is locked they hide and hold still.
@@ -57,6 +59,22 @@ Left-click it to switch between Play and Perch.
 | **Recess** | shimeji: they leap onto the title bars of your real windows (`world.py` reads which window tops are visible, through python-xlib), walk along them, hop between them, ride along when you drag a window, and fall off with a "!" when it closes or something covers their spot. Working agents pick a spot and keep working there. With everything maximized there are no title bars to stand on, so they play on the floor |
 | **Tag** | one Haiku surfs your pointer on an XP arrow ("Cursor is now connected", after BLISS); the rest run from it, slipping along the screen edges when cornered. Touch one and it's It: it chases the pointer until it tags you back |
 | **Bloomcore** | the bc1 eruption: ten more Haikus burst out of the tray and fly onto your windows, everyone dances, and one of the twelve flowers opens wherever a Haiku lands. Leaving Bloomcore folds the extras back into flowers |
+
+**Lemmings** ("Let's go!"): `--lemmings` or the menu. A trapdoor opens above your highest window and ten small Haikus
+drop out one by one and march: off window edges, down onto whatever is below, round at the screen sides, towards a
+flower doorway on the floor (the green HUD counts OUT / IN / SAVED). Click one to make it a **Builder** (it stamps Q.E.D.
+bricks into a staircase, then shrugs), middle-click for a **Floater** (a dandelion puff), right-click for a **Blocker**
+(arms out; the others turn round). A fall from too high leaves them dazed with stars, not splatted. If you don't play
+for ten seconds, a director hands out skills, so it also runs as a screensaver. **Oh No!** in the menu (`--ohno`) is the
+nuke. The agents stay on the edge meanwhile.
+
+**Petal snow** (xsnow, bloomcore edition): `--snow` or the menu, and on during Bloomcore. Petals drift down and pile up
+on your title bars and the bottom edge; move or close a window and its drift slides off; Haikus running through a drift
+kick it up. (About 10% of a CPU core while it's on.)
+
+**Paper airplanes**: when one session sends another a message (SendMessage), a paper plane flies from its chibi to the
+recipient's, who looks up with a "!". Recipients are found by session name, by subagent id, or by the messaging socket's
+pid (via `~/.claude/sessions/<pid>.json`); planes to anyone not on screen fly off the top.
 
 **Movie night** (after MST3K's silhouette row): `--movie` or the menu. The pets open their own window, *Haiku Theater
 3000*, put on one of our films on mute (*Load Up Haiku*, *Load Up Opus*; `./make_tv.sh` extracts them from the bc1/bc2

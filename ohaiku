@@ -13,6 +13,9 @@
                       and a flower opens wherever one lands
   ohaiku --movie      movie night: they open a window, put on one of our films (muted), and watch it from a row
                       of cinema seats, headphones on. In Recess and Bloomcore they sometimes do this by themselves
+  ohaiku --lemmings   "Let's go!": ten Haikus drop from a trapdoor over your windows and march for the flower door.
+                      Click one to build (Q.E.D. bricks), middle-click to float (dandelion), right-click to block.
+                      If you don't play, a director does.  --ohno nukes them ("Oh no!")
   ohaiku --snow       petal snow (xsnow, bloomcore edition): petals pile up on your title bars; on during Bloomcore
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
@@ -131,6 +134,9 @@ class Chibi:
         return self._plate
 
     def shape_input(self):
+        if getattr(self, 'lem', None) is not None:      # a lemming: the whole body takes clicks (that's the game)
+            self.win.input_shape_combine_region(cairo.Region(cairo.RectangleInt(int(self.W / 2 - self.cpx * .3),
+                int(self.foot - self.cpx * .78), int(self.cpx * .6), int(self.cpx * .8)))); return
         if not self.label: self.win.input_shape_combine_region(cairo.Region()); return    # pets: click-through
         P = self.plate(); reg = cairo.Region(cairo.RectangleInt(int(P['x']), int(P['y']), int(P['w']) + 1, int(P['h']) + 1))
         self.calling = bool(self.agent and self.agent.state == 'ask')
@@ -139,6 +145,7 @@ class Chibi:
         self.win.input_shape_combine_region(reg)
 
     def clicked(self, w, ev):
+        if getattr(self, 'lem', None) is not None: self.app.lem_click(self, ev.button); return True
         if ev.button == 1: self.app.focus(self)
         elif ev.button == 2: self.app.dismiss(self)
         elif ev.button == 3: self.app.agent_menu(self).popup_at_pointer(ev)
@@ -411,6 +418,51 @@ class Snow:
         return True
 
 
+class LemOverlay:
+    """Lemmings' furniture: the trapdoor, the flower doorway, the Q.E.D. bricks, and the green HUD"""
+
+    def __init__(self, app):
+        self.app = app
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        scr = Gdk.Screen.get_default(); w.resize(scr.get_width(), scr.get_height()); w.move(0, 0)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        if not app.hidden and not app.locked: w.show_all()
+
+    def draw(self, w, cr):
+        G = self.app.game
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        if not G: return True
+        ex, ey = G['entrance']; op = min(1, G['t'] / .8)
+        cr.set_source_rgb(.42, .27, .15); cr.rectangle(ex - 46, ey - 14, 92, 16); cr.fill()               # the hatch
+        cr.set_source_rgb(.3, .18, .1)
+        for sd in (-1, 1):
+            cr.save(); cr.translate(ex + sd * 44, ey + 2); cr.rotate(sd * op * 1.35)
+            cr.rectangle(-22 if sd > 0 else 0, 0, 22, 5); cr.fill(); cr.restore()
+        xx, fy = G['exit']                                                                                   # the doorway
+        cr.set_source_rgb(.42, .27, .15); cr.new_path(); cr.arc(xx, fy - 52, 26, math.pi, 0); cr.line_to(xx + 26, fy); cr.line_to(xx - 26, fy); cr.close_path(); cr.fill()
+        cr.set_source_rgb(.12, .08, .06); cr.new_path(); cr.arc(xx, fy - 50, 18, math.pi, 0); cr.line_to(xx + 18, fy); cr.line_to(xx - 18, fy); cr.close_path(); cr.fill()
+        for k in range(12):
+            a = k / 12 * 6.283; cr.set_source_rgb(.99, .78, .2); cr.arc(xx + 15 * math.cos(a), fy - 86 + 15 * math.sin(a), 7, 0, 6.3); cr.fill()
+        cr.set_source_rgb(.45, .26, .12); cr.arc(xx, fy - 86, 9, 0, 6.3); cr.fill()
+        for b in G['bricks']:                                                                                # Q.E.D. bricks
+            cr.set_source_rgb(.82, .48, .33); cr.rectangle(b.x0, b.y, b.x1 - b.x0, 6); cr.fill()
+            cr.set_source_rgba(.77, .16, .23, .9); cr.set_line_width(1); cr.rectangle(b.x0 + 6, b.y + 1.5, b.x1 - b.x0 - 12, 3); cr.stroke()
+        txt = 'OUT %d  IN %d  SAVED %d%%' % (G['out'], G['saved'], 100 * G['saved'] // G['n'])
+        hint = 'click: build   middle-click: float   right-click: block' if G['t'] < 25 else ''
+        if G.get('over'): txt, hint = G['over'], ''
+        cr.select_font_face('Monospace', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(20)
+        wa = self.app.workarea(); x0, y0 = wa.x + 24, wa.y + 40
+        for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2)): cr.move_to(x0 + dx, y0 + dy); cr.set_source_rgb(0, .12, 0); cr.show_text(txt)
+        cr.move_to(x0, y0); cr.set_source_rgb(.2, .95, .25); cr.show_text(txt)
+        if hint:
+            cr.set_font_size(13); cr.move_to(x0, y0 + 22); cr.set_source_rgba(0, .3, 0, .9); cr.show_text(hint)
+        return True
+
+
 class Theater:
     """Movie night: the pets' own window, playing our films on mute (after MST3K, they sit in a row in front of it)"""
 
@@ -575,6 +627,7 @@ class App:
         self.theater, self.audience, self.last_movie = None, [], time.time()       # movie night
         self.planes, self.seen_sends = [], None                                    # paper airplanes
         self.snow = None                                                           # petal snow
+        self.game, self.lems, self.lemov = None, [], None                          # lemmings
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -609,7 +662,7 @@ class App:
         except Exception as e:
             print('ohaiku: no recess (python-xlib?):', e, file=sys.stderr); self.world_ok = False; return
         while True:
-            if (self.mode in ('recess', 'bloomcore') or self.snow) and not self.hidden:
+            if (self.mode in ('recess', 'bloomcore', 'lemmings') or self.snow) and not self.hidden:
                 try: GLib.idle_add(self.set_surfaces, W.poll())
                 except Exception as e: print('ohaiku: world:', e, file=sys.stderr)
                 time.sleep(.12)
@@ -743,15 +796,16 @@ class App:
             self.movie()                                  # it's their playtime; sometimes they put a film on
         if self.mode == 'tag':
             self.tag(cx, cy, dt); self.reap(); self.keep_on_top(); return True
+        if self.mode == 'lemmings' and self.game: self.lem_tick(dt)
         fl = self.floor()
         for c, tx, ty in list(self.targets(cx, cy)):
             if c.arc or c.falling: self.air(c, dt)
             elif self.mode in ('recess', 'bloomcore') and c.state != 'spawn': self.recess(c, dt, fl)
             else:
-                if self.mode == 'perch' and c.y < fl - 6 and c.state != 'spawn':     # up on a window: jump down home
+                if self.mode in ('perch', 'lemmings') and c.y < fl - 6 and c.state != 'spawn':     # up on a window: jump down home
                     self.leap(c, c.slot, fl, None)
                 else: c.step(dt, tx, ty)
-            near = self.mode != 'follow' and abs(cx - c.x) < c.cpx * .45 + 30 and c.y - c.foot - 30 < cy < c.y + 40
+            near = self.mode not in ('follow',) and abs(cx - c.x) < c.cpx * .45 + 30 and c.y - c.foot - 30 < cy < c.y + 40
             c.duck += (float(near) - c.duck) * min(1, 8 / HZ)
             if c.duck < .01: c.duck = 0
             c.tick_draw()
@@ -770,11 +824,11 @@ class App:
     def keep_on_top(self):
         self.tk += 1
         if self.tk % (HZ * 2) == 0 and not self.hidden:
-            for c in ([self.snow] if self.snow else []) + self.everyone() + self.balloons:
+            for c in ([self.snow] if self.snow else []) + ([self.lemov] if self.lemov else []) + self.everyone() + self.balloons:
                 gw = c.win.get_window()
                 if gw: gw.raise_()
 
-    def everyone(self): return list(self.agents.values()) + self.pets + self.audience
+    def everyone(self): return list(self.agents.values()) + self.pets + self.audience + self.lems
 
     # -- movie night ----------------------------------------------------------------------------------------
     def movie(self):
@@ -804,6 +858,143 @@ class App:
             c.arc, c.seated = None, False; c.set('alert'); self.pets.append(c)
         self.audience = []
         self.layout()
+
+    # -- Lemmings: "Let's go!" ------------------------------------------------------------------------------
+    def lemmings_start(self):
+        import world
+        wa = self.workarea(); fl = self.floor()
+        tops = sorted((x for x in self.surfaces if x.y > wa.y + 170), key=lambda x: x.y)
+        if tops:
+            t = tops[0]; a, b = max(t.segs, key=lambda q: q[1] - q[0]); ex, ey = (a + b) / 2, t.y - 130
+        else:
+            ex, ey = wa.x + 220, wa.y + 90
+        xx = wa.x + wa.width - 170 if ex < wa.x + wa.width / 2 else wa.x + 170
+        self.game = dict(t=0.0, n=10, out=0, saved=0, released=0, entrance=(ex, ey), exit=(xx, fl), bricks=[], next_id=0,
+                         last_click=time.time(), director=time.time() + 6, over=None, Surface=world.Surface)
+        if not self.lemov: self.lemov = LemOverlay(self)
+        GLib.timeout_add(600, lambda: (self.balloon_at(ex, ey, "Let's go!"), False)[1])
+
+    def balloon_at(self, x, y, title):
+        class P: pass
+        p = P(); p.x, p.y, p.foot, p.gone = x, y + 20, 0, False
+        self.balloons.append(Balloon(self, p, title, '', 2.2))
+
+    def lem_release(self):
+        G = self.game; ex, ey = G['entrance']
+        if not self.unused: self.unused = list(range(1, 12)); random.shuffle(self.unused)
+        c = Chibi(self, 'haiku%02d' % self.unused.pop(), ex, ey, scale=.62)
+        c.lem = dict(dir=random.choice((-1, 1)), skill=None, mode='fall', vy=0.0, fallh=0.0, timer=0.0, bricks=0, sx0=None)
+        c.on = None; c.set('fall'); c.shape_input()
+        self.lems.append(c); G['released'] += 1; G['out'] += 1
+
+    def lem_click(self, c, button):
+        if not self.game: return
+        self.game['last_click'] = time.time()
+        self.lem_skill(c, {1: 'builder', 2: 'floater', 3: 'blocker'}.get(button))
+
+    def lem_skill(self, c, sk):
+        L = c.lem
+        if sk is None or L['skill'] == 'blocker': return
+        if sk == 'floater': L['floater'] = True; return            # floating is permanent, like the umbrella
+        L['skill'] = sk
+        if sk == 'builder': L['bricks'] = 0
+
+    def lem_surfaces(self):
+        return self.surfaces + self.game['bricks']
+
+    def lem_tick(self, dt):
+        G = self.game; G['t'] += dt
+        wa = self.workarea(); fl = self.floor(); S = self.lem_surfaces()
+        if G['released'] < G['n'] and G['t'] > 1.2 + G['released'] * 1.1: self.lem_release()
+        # the director: if you're not playing, it plays
+        if time.time() - G['last_click'] > 10 and time.time() > G['director']:
+            G['director'] = time.time() + random.uniform(2.5, 5)
+            walkers = [c for c in self.lems if c.lem['mode'] == 'walk' and not c.lem['skill']]
+            if walkers:
+                c = random.choice(walkers)
+                nb = sum(1 for x in self.lems if x.lem['skill'] == 'blocker')
+                sk = random.choice(['builder', 'builder', 'floater'] + (['blocker'] if nb < 1 and len(walkers) > 3 else []))
+                self.lem_skill(c, sk)
+        for c in list(self.lems):
+            if c.gone: continue
+            L = c.lem; c.t += dt
+            if L['mode'] == 'gone':
+                if c.state == 'spawn' and c.rev and c.done_anim(): c.gone = True
+                c.tick_draw(); continue
+            if L['mode'] == 'fall':
+                L['vy'] = min(L['vy'] + 1500 * dt, 70 if L.get('floater') else 900)
+                ny = c.y + L['vy'] * dt; L['fallh'] += L['vy'] * dt
+                land = None
+                for sf in S:
+                    if c.y <= sf.y <= ny and sf.stands(c.x, 0): land = sf; break
+                if land is None and ny >= fl: land = 'floor'
+                if land is not None:
+                    c.y = fl if land == 'floor' else land.y; c.on = None if land == 'floor' else land.id
+                    L['sx0'] = None if land == 'floor' else land.x0
+                    if L['fallh'] > 380 and not L.get('floater'): L['mode'], L['timer'] = 'dazed', 1.8; c.set('dizzy')
+                    else: L['mode'] = 'walk'
+                    L['vy'] = L['fallh'] = 0.0
+                else:
+                    c.y = ny; c.set('float' if L.get('floater') else 'fall')
+            elif L['mode'] == 'dazed':
+                L['timer'] -= dt
+                if L['timer'] <= 0: L['mode'] = 'walk'
+            elif L['mode'] in ('walk', 'build'):
+                sf = next((x for x in S if x.id == c.on), None) if c.on is not None else None
+                if c.on is not None and (sf is None or not sf.stands(c.x, 0)):
+                    L['mode'], L['vy'], L['fallh'] = 'fall', 0.0, 0.0; c.on = None; continue
+                if sf is not None:
+                    if L['sx0'] is not None: c.x += sf.x0 - L['sx0']
+                    L['sx0'] = sf.x0; c.y = sf.y
+                else:
+                    c.y = fl
+                if L['skill'] == 'blocker': c.set('block'); c.tick_draw(); continue
+                if L['skill'] == 'builder':
+                    L['mode'] = 'build'; c.set('build'); L['timer'] += dt
+                    if L['timer'] > .6:
+                        L['timer'] = 0.0
+                        bx = c.x + L['dir'] * 10; by = c.y - 6
+                        G['next_id'] += 1
+                        b = G['Surface']('brick%d' % G['next_id'], min(bx, bx + L['dir'] * 26), max(bx, bx + L['dir'] * 26), by,
+                                         [(min(bx, bx + L['dir'] * 26), max(bx, bx + L['dir'] * 26))])
+                        G['bricks'].append(b)
+                        c.x += L['dir'] * 13; c.y = by; c.on = b.id; L['sx0'] = b.x0
+                        L['bricks'] += 1
+                        if L['bricks'] >= 12: L['skill'] = None; L['mode'] = 'walk'; self.balloon(c, '*shrug*', '', 1.2)
+                    c.tick_draw(); continue
+                L['mode'] = 'walk'
+                nx = c.x + L['dir'] * 52 * c.sc / .62 * dt
+                for o in self.lems:                                  # a blocker turns you round
+                    if o is not c and o.lem['skill'] == 'blocker' and o.on == c.on and abs(o.y - c.y) < 8 and 0 < (o.x - c.x) * L['dir'] < 22:
+                        L['dir'] *= -1; nx = c.x; break
+                if nx < wa.x + 16 or nx > wa.x + wa.width - 16: L['dir'] *= -1; nx = c.x
+                step = next((x for x in G['bricks'] if x.id != c.on and 0 < c.y - x.y <= 8 and x.stands(nx, 0)), None)
+                if step: c.on = step.id; L['sx0'] = step.x0; c.y = step.y                    # up the stairs
+                elif sf is not None and not sf.stands(nx, 0):
+                    c.x = nx; L['mode'], L['vy'], L['fallh'] = 'fall', 0.0, 0.0; c.on = None; continue
+                c.x = nx; c.set('runR' if L['dir'] > 0 else 'runL')
+                if c.on is None and abs(c.x - G['exit'][0]) < 12:          # home!
+                    L['mode'] = 'gone'; G['saved'] += 1; G['out'] -= 1; c.leave()
+            c.tick_draw()
+        self.lems = [c for c in self.lems if not (c.gone and (c.win.destroy() or True))]
+        if G['released'] == G['n'] and not self.lems and not G.get('over'):
+            G['over'] = 'ALL OUT.  SAVED %d%%' % (100 * G['saved'] // G['n'])
+            GLib.timeout_add(5000, lambda: (self.mode == 'lemmings' and self.set_mode('perch'), False)[1])
+        if self.lemov and self.tk % 2 == 0: self.lemov.win.queue_draw()
+
+    def oh_no(self):
+        """Lemmings' nuke: everyone says "Oh no!" and pops"""
+        if not self.game: return
+        self.game['n'] = self.game['released']
+        for c in self.lems:
+            if c.lem['mode'] != 'gone':
+                self.balloon(c, 'Oh no!', '', 1.4); c.lem['mode'] = 'gone'; c.set('fall')
+                GLib.timeout_add(int(1300 + random.uniform(0, 500)), lambda c=c: (c.leave(), False)[1])
+
+    def lemmings_end(self):
+        for c in self.lems: c.win.destroy()
+        self.lems, self.game = [], None
+        if self.lemov: self.lemov.win.destroy(); self.lemov = None
 
     def toggle_snow(self, on=None):
         on = (self.snow is None) if on is None else on
@@ -1044,6 +1235,7 @@ class App:
                 for c in self.audience: c.win.destroy()
                 if self.theater: self.theater.win.destroy(); self.theater = None
                 self.toggle_snow(False)
+                self.lemmings_end()
                 self.pets, self.party, self.flowers, self.audience = [], [], [], []
                 fl = self.floor()
                 for c in self.agents.values():
@@ -1104,6 +1296,8 @@ class App:
         item('Recess (play on the windows)', lambda: self.set_mode('recess'))
         item('Tag (one surfs your pointer)', lambda: self.set_mode('tag'))
         item('Bloomcore', lambda: self.set_mode('bloomcore'))
+        item('Lemmings', lambda: self.set_mode('lemmings'))
+        if self.game: item('Oh No! (nuke the lemmings)', self.oh_no)
         item('Movie Night', self.movie)
         item('Petal Snow', self.toggle_snow)
         item('Nothing! Studying!', self.study)
@@ -1149,21 +1343,25 @@ class App:
             for c in self.everyone(): c.win.hide()
             if self.theater: self.theater.win.hide()
             if self.snow: self.snow.win.hide()
+            if self.lemov: self.lemov.win.hide()
         elif m == 'show':
             self.hidden = False
             for c in self.everyone(): c.win.show_all()
             if self.theater: self.theater.show()
             if self.snow: self.snow.win.show_all()
+            if self.lemov: self.lemov.win.show_all()
         else:
             if m == 'play': m = 'follow'
-            if m in ('recess', 'bloomcore') and not self.world_ok: m = 'perch'
+            if m in ('recess', 'bloomcore', 'lemmings') and not self.world_ok: m = 'perch'
             for c in self.everyone(): c.next_hop, c.settled, c.goal = None, False, None
-            if self.mode in ('recess', 'bloomcore') and m not in ('recess', 'bloomcore') and not self.snow: self.surfaces = []
+            if self.mode in ('recess', 'bloomcore', 'lemmings') and m not in ('recess', 'bloomcore', 'lemmings') and not self.snow: self.surfaces = []
             if self.mode == 'tag' and m != 'tag':
                 if self.surfer: self.surfer.set('idle')
                 self.surfer, self.it = None, 'you'
                 for c in self.everyone(): c.speed = 400 * c.sc
             if m == 'tag': self.it, self.it_t = 'you', 0.0
+            if self.mode == 'lemmings' and m != 'lemmings': self.lemmings_end()
+            if m == 'lemmings' and self.mode != 'lemmings': GLib.timeout_add(500, lambda: (self.lemmings_start(), False)[1])
             if self.mode == 'bloomcore' and m != 'bloomcore':
                 for c in self.party: c.leave()
                 self.party = []
@@ -1184,10 +1382,11 @@ class App:
         for c in cmds:
             if c == 'pet': self.add_pet()
             elif c == 'opus': self.add_pet('opus%d' % random.randrange(8))
-            elif c in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
+            elif c in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
             elif c == 'studying': self.study()
             elif c == 'movie': self.movie()
             elif c == 'snow': self.toggle_snow()
+            elif c == 'ohno': self.oh_no()
 
     # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
     def tray(self):
@@ -1207,10 +1406,11 @@ class App:
         grp = None
         for key, label in (('perch', 'Perch (out of the way)'), ('follow', 'Follow (chase the pointer)'),
                            ('recess', 'Recess (play on the windows)'), ('tag', 'Tag (one surfs your pointer)'),
-                           ('bloomcore', 'Bloomcore'), ('hide', 'Hide')):
+                           ('bloomcore', 'Bloomcore'), ('lemmings', 'Lemmings'), ('hide', 'Hide')):
             r = Gtk.RadioMenuItem.new_with_label_from_widget(grp, label); grp = grp or r
             r.connect('toggled', lambda w, k=key: (not self.menu_lock and w.get_active()) and self.set_mode(k))
             m.append(r); self.radios[key] = r
+        item('Oh No! (nuke the lemmings)', self.oh_no)
         item('Movie Night', self.movie)
         item('Petal Snow', self.toggle_snow)
         item('Nothing! Studying!  (or shake the mouse)', self.study)
@@ -1246,14 +1446,14 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow') if getattr(a, m)]
+    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow') if getattr(a, m)]
     pid = running_pid()
     if a.quit or a.restart:
         if pid:
@@ -1282,7 +1482,7 @@ def main():
     import cairo
     sys.path.insert(0, HERE)
     app = App(a)
-    for m in modes: app.study() if m == 'studying' else app.movie() if m == 'movie' else app.toggle_snow() if m == 'snow' else app.set_mode(m)
+    for m in modes: app.study() if m == 'studying' else app.movie() if m == 'movie' else app.toggle_snow() if m == 'snow' else app.oh_no() if m == 'ohno' else app.set_mode(m)
     Gtk.main()
 
 

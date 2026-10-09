@@ -91,6 +91,21 @@ function ohStates(who) {
     H(g, { t: i / 12, move: 'idle', beat: 0, expr: 'joy', arms: [[56, -6 + 10 * sw, 0], [56, -6 - 10 * sw, 0]] }, 0, -22);
     g.restore();
   } };
+  // --- lemmings: floating under a dandelion, dazed after a long fall, blocking, building with the Q.E.D. stamp ---
+  S.float = { fps: 12, loop: true, n: 16, f: (g, i) => {
+    const sw = Math.sin(i / 16 * Math.PI * 2);
+    g.save(); g.rotate(.08 * sw);
+    H(g, { t: i / 12, move: 'idle', beat: 0, expr: 'o', arms: [[18, -70, 10], [18, -70, 10]] });
+    g.strokeStyle = '#6f9a4f'; g.lineWidth = 6; g.beginPath(); g.moveTo(0, -250); g.lineTo(2, -290); g.stroke();
+    drawBloom(g, 2, -306, .8, 1, 9, { t: i / 12 });
+    g.restore();
+  } };
+  S.dizzy = { fps: 12, loop: true, n: 12, f: (g, i) => {
+    H(g, { t: i / 12, move: 'freeze', freeze: 2, beat: 0, expr: 'dizzy' });
+    for (let k = 0; k < 3; k++) { const a = i / 12 * Math.PI * 2 + k * 2.1; ohStar(g, 60 * Math.cos(a), -290 + 14 * Math.sin(a), 11); }
+  } };
+  S.block = { fps: 12, loop: true, n: 12, f: (g, i) => H(g, { t: i / 12, move: 'idle', beat: 0, expr: 'determined', arms: [[64, -2 + (i % 6 < 3 ? 2 : -2), 0], [64, -2, 0]] }) };
+  S.build = { fps: 13.33, loop: true, n: 16, f: (g, i) => H(g, { t: i / 13.33, move: 'idle', beat: i * .125, prop: 'stamp', book: false, expr: 'determined' }, 0, 0) };
   // --- movie night (after MST3K's silhouette row): seen from behind, in a cinema seat, headphones on ---
   const seat = (g, i, o = {}) => {
     const t = i / 12, bob = o.bob ?? 2.5 * Math.sin(i / 24 * Math.PI * 4), sh = o.shake || 0;
@@ -156,6 +171,11 @@ function ohArrowBoard(g, x, y) {
   g.beginPath(); P.forEach(([a, b], k) => k ? g.lineTo(a, b) : g.moveTo(a, b)); g.closePath();
   g.fillStyle = '#ffffff'; g.fill(); g.lineWidth = 6; g.strokeStyle = '#111'; g.lineJoin = 'round'; g.stroke();
   g.restore();
+}
+function ohStar(g, x, y, r) {
+  g.save(); g.translate(x, y); g.beginPath();
+  for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2 - Math.PI / 2, rr = k % 2 ? r * .45 : r; g.lineTo(rr * Math.cos(a), rr * Math.sin(a)); }
+  g.closePath(); g.fillStyle = '#ffd84a'; g.fill(); g.strokeStyle = '#4a2c1c'; g.lineWidth = 2.5; g.stroke(); g.restore();
 }
 // a thought cloud with dots that fill in one by one
 function ohThink(g, x, y, u) {
@@ -254,6 +274,13 @@ function bakeBlooms(px) {
   return out;
 }
 
+function testSheet5() {
+  const s = .5, cell = OH.cellU * s, names = ['float', 'dizzy', 'block', 'build'];
+  const c = document.createElement('canvas'); c.width = cell * 4; c.height = cell;
+  const g = c.getContext('2d'); g.fillStyle = '#e8e4dc'; g.fillRect(0, 0, c.width, c.height);
+  names.forEach((n, j) => { const S = ohStates(j * 2 + 1); g.save(); g.translate(j * cell + cell / 2, OH.footU * s); g.scale(s, s); S[n].f(g, 5); g.restore(); });
+  return c;
+}
 function testSheet4() {
   const s = .5, cell = OH.cellU * s, names = ['watch', 'munch', 'giggle', 'whisper'];
   const c = document.createElement('canvas'); c.width = cell * 4; c.height = cell;
