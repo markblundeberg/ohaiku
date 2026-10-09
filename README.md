@@ -127,9 +127,16 @@ technique, a striking bit of art or writing). It remembers the last few looks, s
   matches a line there isn't in the cast, and its chibi and plate are blacked out of the screenshot too.
 - **The placard** at the end of the row, PEANUT GALLERY, says it's on; its red dot lights each time it looks. Click it
   to stop. Hiding them, locking the screen or Nothing! Studying! pauses it (Nothing! Studying! turns it off).
-- **Notes**: what they saw, every quip and every note go to `~/.local/share/ohaiku/gallery/<date>.md`, and when you turn
-  the gallery off Haiku writes a short recap of the showing with a *Worth keeping* list ("Open the Gallery Notes" in the
-  tray menu). Movie night's audience joins the cast, so a film in the theater gets riffed too.
+- **Eyes**: each look is the whole screen, small, plus the window you're looking at, sharper (up to 1568 px), so it can
+  read the caption a joke hangs on. (If that window is a private one, it only gets the small, redacted whole.)
+- **Notes**: what they saw (a few concrete sentences, quoting headlines and captions), every quip, every note, and every
+  *wish* (something they'd love to see more of: the full video, the whole thread) go to
+  `~/.local/share/ohaiku/gallery/<date>.md`, with the redacted screenshot saved beside it for any look that made a note
+  or a wish. When you turn the gallery off, Haiku writes a short recap with a *Worth keeping* list ("Open the Gallery
+  Notes" in the tray menu). Movie night's audience joins the cast, so a film in the theater gets riffed too.
+- **Inspo**: the recap's *Worth keeping* list (each with its source) and the wishes also go to
+  `~/claude-inspo/peanut-gallery/` (`<date>.md`, `wishlist.md`), for the other Claudes. Nothing is fetched by itself:
+  the wishlist waits for you, or a Claude you ask.
 
 **Nothing! Studying!** From any tier: shake the mouse hard left and right (or `--studying`, or the menu). Everyone spins
 into the tray icon, silently (it's for hiding them, so no sound), and three seconds later one Haiku peeks up by the

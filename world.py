@@ -26,7 +26,7 @@ class Surfaces:
         self.at = {k: A(k) for k in ('_NET_CLIENT_LIST_STACKING', '_NET_CURRENT_DESKTOP', '_NET_WM_DESKTOP', '_NET_WM_STATE',
                                      '_NET_WM_STATE_HIDDEN', '_NET_WM_WINDOW_TYPE', '_NET_WM_WINDOW_TYPE_DOCK',
                                      '_NET_WM_WINDOW_TYPE_DESKTOP', '_NET_FRAME_EXTENTS', '_GTK_FRAME_EXTENTS',
-                                     '_NET_WM_STATE_FULLSCREEN')}
+                                     '_NET_WM_STATE_FULLSCREEN', '_NET_ACTIVE_WINDOW')}
 
     def _prop(self, w, name, typ=Xatom.CARDINAL):
         try:
@@ -85,6 +85,11 @@ class Surfaces:
             except XError:
                 continue
         return out
+
+    def active(self):
+        """the focused window's id (_NET_ACTIVE_WINDOW), or None"""
+        v = self._prop(self.root, '_NET_ACTIVE_WINDOW')
+        return v[0] if v else None
 
     def poll(self, top_limit=0):
         rs = self.rects()

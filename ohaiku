@@ -1643,6 +1643,7 @@ class App:
         S = world.Surfaces()
         W, H = S.d.screen().width_in_pixels, S.d.screen().height_in_pixels
         last_thumb, last_sent, hist, wait = None, 0.0, self.gal_hist, GAL_EVERY
+        wants, log = [], []
         live = lambda: self.gallery_on and self.gal_gen == gen
         while live():
             time.sleep(1)
@@ -1651,7 +1652,8 @@ class App:
             if why: self.gal_why = why; continue
             if time.time() - last_sent < wait: continue
             try:
-                jpg, th = gallery.capture(W, H, gallery.private_rects(S.windows()) + list(self.gal_hide))
+                wins = S.windows()
+                imgs, th = gallery.capture(W, H, gallery.private_rects(wins) + list(self.gal_hide), gallery.focus_rect(wins, S.active(), W, H))
             except Exception as e:
                 print('ohaiku: gallery capture:', e, file=sys.stderr); last_sent, wait = time.time(), 60
                 self.gal_why = 'screenshot failed: %s' % str(e)[:80]; continue
@@ -1661,20 +1663,32 @@ class App:
             self.gal_why = 'looking...'
             GLib.idle_add(lambda: (self.placard and setattr(self.placard, 'blink', 1.0), False)[1])
             try:
-                res = gallery.look(jpg, list(self.gal_cast), hist)
+                res = gallery.look(imgs, list(self.gal_cast), hist)
             except Exception as e:
                 print('ohaiku: gallery:', e, file=sys.stderr); wait = 60
                 self.gal_why = 'Haiku call failed: %s' % str(e)[:80]; continue
             if not live(): break
             self.gal_why, self.gal_looks = 'watching (last look %s)' % time.strftime('%H:%M:%S'), getattr(self, 'gal_looks', 0) + 1
-            hist.append('%s seen: %s' % (time.strftime('%H:%M'), res['seen']) + ''.join(' | %s: "%s"' % (r['who'], r['line']) for r in res['riffs']))
+            hist.append('%s seen: %s' % (time.strftime('%H:%M'), res['seen']) + ''.join(' | %s: "%s"' % (r['who'], r['line']) for r in res['riffs'])
+                        + (' | noted: %s' % res['note'] if res['note'] else '') + (' | wished for: %s' % res['want']['what'] if res['want'] else ''))
+            if res['want']: wants.append(res['want'])
+            log.append(hist[-1] + (' | detail: %s' % res['detail'] if res['detail'] else ''))
             try:
-                gallery.write('**%s** %s' % (time.strftime('%H:%M'), res['seen']) + ''.join('\n> **%s:** %s' % (r['who'], r['line']) for r in res['riffs'])
-                              + ('\n\n\u270e %s' % res['note'] if res['note'] else ''))
+                shot = ''
+                if res['note'] or res['want']:                # keep the look itself (redacted) when it was worth a note
+                    shot = '\n\n![](%s)' % gallery.keep(imgs[-1])
+                gallery.write('**%s** %s' % (time.strftime('%H:%M'), res['seen']) + ('\n\n%s' % res['detail'] if res['detail'] else '')
+                              + ''.join('\n> **%s:** %s' % (r['who'], r['line']) for r in res['riffs'])
+                              + ('\n\n\u270e %s' % res['note'] if res['note'] else '')
+                              + ('\n\n\u2606 wish: %s (%s)%s' % (res['want']['what'], res['want']['why'], ' \u2014 ' + res['want']['where'] if res['want']['where'] else '') if res['want'] else '')
+                              + shot)
             except OSError: pass
             GLib.idle_add(self.gallery_result, res)
-        if self.gal_gen == gen + 1 and not self.gallery_on and len(hist) >= 3:       # turned off (not quit): a recap for the notebook
-            try: gallery.write('## Recap, %s\n\n%s' % (time.strftime('%H:%M'), gallery.recap(hist)))
+        if self.gal_gen == gen + 1 and not self.gallery_on and len(log) >= 3:       # turned off (not quit): a recap for the notebook
+            try:
+                rc = gallery.recap(log)
+                gallery.write('## Recap, %s\n\n%s' % (time.strftime('%H:%M'), rc))
+                gallery.to_inspo(rc, wants)
             except Exception as e: print('ohaiku: gallery recap:', e, file=sys.stderr)
 
     def gallery_result(self, res):

@@ -3,7 +3,9 @@
 Off unless you turn it on. While on, every ~15 s (only when the screen has changed) it takes a screenshot, blacks out
 the windows it must not see, and asks Haiku (through your Claude Code login: `claude -p --model haiku`, no tools, no
 saved session) for a line of what's on screen, up to two quips for named members of the cast, and now and then a
-note worth keeping. Notes, quips and what they saw go to ~/.local/share/ohaiku/gallery/<date>.md.
+note worth keeping. Notes, quips and what they saw go to ~/.local/share/ohaiku/gallery/<date>.md (with the
+screenshot, redacted, for any look that made a note). The recap's nuggets and the gallery's wishlist go to
+~/claude-inspo/peanut-gallery/, for the other Claudes.
 
 Never seen (blacked out): terminals and the Claude desktop app (where the sessions are), and any window whose class or
 title contains a line of ~/.config/ohaiku/gallery-skip.txt.
@@ -15,24 +17,33 @@ NOTES = os.environ.get('OHAIKU_GALLERY_NOTES') or os.path.expanduser('~/.local/s
 WORK = os.path.expanduser('~/.cache/ohaiku/gallery')
 NEVER = ('terminal', 'xterm', 'konsole', 'kitty', 'alacritty', 'tilix', 'terminator', 'wezterm', 'urxvt', 'foot',
          'guake', 'tilda', 'yakuake', 'st-256color', 'com.anthropic.claude')
-SEND_W = 1280                                         # the screenshot is scaled to this width
+SEND_W = 1024                                         # the whole screen is scaled to this width (for context)
+DETAIL = 1568                                         # and the window you're looking at, to this long edge (to read it)
+INSPO = os.environ.get('OHAIKU_GALLERY_INSPO') or os.path.expanduser('~/claude-inspo/peanut-gallery')
 POSES = ('giggle', 'gasp', 'cheer', 'whisper', 'munch', 'watch')
 
 SYSTEM = """You are the Peanut Gallery: a row of tiny chibi characters (Claude models: Haikus in flower hoods, Opuses) \
 sitting along the bottom of Mark's screen with their backs to him, watching whatever he has up, like the silhouettes \
 in Mystery Science Theater 3000. You are the puppeteer and every one of their voices. Every so often you get a fresh \
-screenshot.
+screenshot: the whole screen, small, and (usually) a second, sharper image of the window Mark is looking at. Read \
+it properly: in a post, the joke is often in the text above the picture; get the joke before you riff.
 
 Reply with ONE JSON object and nothing else:
 {"seen": "what's on screen now, at most 12 words",
+ "detail": "2 to 4 sentences for the notebook: what it is, concretely. Quote the headline, caption or joke text \
+(public posts and pages only), name the video, site or author when visible",
  "riffs": [{"who": "<a cast name>", "line": "<a quip, gasp or reaction, at most 70 characters>", \
 "pose": "giggle|gasp|cheer|whisper|munch|watch"}],
- "note": null}
+ "note": null,
+ "want": null}
 
 - riffs: 0 to 2. Funny, warm, quick; MST3K energy; each voice a little different. If nothing new happened since the \
 last look, return no riffs: silence is fine, and never repeat an earlier line.
 - note: usually null. When something on screen is genuinely worth keeping (an idea it sparks, a technique, a striking \
 piece of art or writing, a good joke, a thing to try), a short line saying what and why. Ideas and inspiration only.
+- want: usually null. When the gallery would love to keep or see more of something (the full video, the whole \
+thread, the artist's other work), {"what": "...", "why": "...", "where": "URL or how to find it, if visible"}. \
+It goes on a wishlist that Mark or a Claude may fetch later.
 - Black boxes are private windows, hidden on purpose: ignore them, never guess what's in them.
 - Never read out or note personal details (names of private people, emails, phone numbers, addresses, money, \
 passwords, private messages). Riff on the gist, not the particulars. Be kind about Mark; he's the host.
@@ -72,17 +83,41 @@ def private_rects(windows):
     return out
 
 
-def capture(W, H, private, display=None):
-    """(jpeg bytes scaled to SEND_W, 32x18 grey thumbnail bytes) of the whole screen with `private` blacked out"""
+def focus_rect(windows, active, W, H):
+    """the window Mark is looking at, if it may be seen and isn't (nearly) the whole screen: (x, y, w, h) on screen"""
+    words = skip_words()
+    for (wid, x, y, w, h, cls, title) in windows:
+        if wid != active: continue
+        c, t = cls.lower(), title.lower()
+        if any(n in c for n in NEVER) or any(k in c or k in t for k in words): return None
+        x0, y0, x1, y1 = max(0, x), max(0, y), min(W, x + w), min(H, y + h)
+        if x1 - x0 < 200 or y1 - y0 < 150: return None
+        return (x0, y0, (x1 - x0) // 2 * 2, (y1 - y0) // 2 * 2)
+    return None
+
+
+def capture(W, H, private, focus=None, display=None):
+    """the screen with `private` blacked out: [jpeg images to send], 32x18 grey thumbnail. The images are the whole
+    screen scaled to SEND_W and, if `focus` (a window rect) is given, that window up to DETAIL; if the window is (nearly)
+    the whole screen, just the screen at DETAIL"""
     os.makedirs(WORK, exist_ok=True)
-    jpg, thumb = os.path.join(WORK, 'look.jpg'), os.path.join(WORK, 'thumb.gray')
+    jpg, jpg2, thumb = os.path.join(WORK, 'look.jpg'), os.path.join(WORK, 'look-window.jpg'), os.path.join(WORK, 'thumb.gray')
     boxes = ''.join(',drawbox=x=%d:y=%d:w=%d:h=%d:color=black:t=fill' % (max(0, x), max(0, y), w, h) for x, y, w, h in private)
-    fc = '[0:v]null%s,split=2[a][b];[a]scale=%d:-2[o];[b]scale=32:18,format=gray[t]' % (boxes, min(SEND_W, W))
+    big = focus and focus[2] * focus[3] > .8 * W * H
+    sw = min(DETAIL if (big or not focus) and W > SEND_W * 1.4 else SEND_W, W)
+    if focus and not big:
+        x, y, w, h = focus; k = min(1, DETAIL / max(w, h))
+        fc = ('[0:v]null%s,split=3[a][b][c];[a]scale=%d:-2[o];[b]scale=32:18,format=gray[t];[c]crop=%d:%d:%d:%d,scale=%d:-2[f]'
+              % (boxes, sw, w, h, x, y, int(w * k) // 2 * 2))
+    else:
+        fc = '[0:v]null%s,split=2[a][b];[a]scale=%d:-2[o];[b]scale=32:18,format=gray[t]' % (boxes, sw)
     cmd = ['ffmpeg', '-loglevel', 'error', '-y', '-f', 'x11grab', '-draw_mouse', '0', '-video_size', '%dx%d' % (W, H),
            '-i', display or os.environ.get('DISPLAY', ':0'), '-filter_complex', fc,
            '-map', '[o]', '-frames:v', '1', '-q:v', '5', jpg, '-map', '[t]', '-frames:v', '1', '-f', 'rawvideo', thumb]
+    if focus and not big: cmd += ['-map', '[f]', '-frames:v', '1', '-q:v', '4', jpg2]
     subprocess.run(cmd, check=True, timeout=20, stdin=subprocess.DEVNULL)
-    return open(jpg, 'rb').read(), open(thumb, 'rb').read()
+    imgs = [open(jpg, 'rb').read()] + ([open(jpg2, 'rb').read()] if focus and not big else [])
+    return imgs, open(thumb, 'rb').read()
 
 
 def changed(a, b):
@@ -111,13 +146,15 @@ def _claude(content, system, timeout=90):
     raise RuntimeError((p.stderr or 'no result')[-300:])
 
 
-def look(jpeg, cast, history):
-    """ask Haiku about one screenshot. cast: [(name, what they are)]; history: recent lines. -> dict"""
+def look(imgs, cast, history):
+    """ask Haiku about one look (the whole screen, and maybe the window in front, sharper). cast: [(name, what they
+    are)]; history: recent lines. -> dict"""
     import base64
-    text = 'Cast (use these names exactly): %s\n\nEarlier tonight (oldest first):\n%s\n\nHere is the screen now.' % (
-        '; '.join('%s (%s)' % c for c in cast), '\n'.join(history[-10:]) or '(nothing yet: the lights just went down)')
-    out = _claude([{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': base64.b64encode(jpeg).decode()}},
-                   {'type': 'text', 'text': text}], SYSTEM)
+    text = 'Cast (use these names exactly): %s\n\nEarlier tonight (oldest first):\n%s\n\nHere is the screen now%s.' % (
+        '; '.join('%s (%s)' % c for c in cast), '\n'.join(history[-10:]) or '(nothing yet: the lights just went down)',
+        ', then the window Mark is looking at' if len(imgs) > 1 else '')
+    out = _claude([{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': base64.b64encode(j).decode()}} for j in imgs]
+                  + [{'type': 'text', 'text': text}], SYSTEM)
     m = re.search(r'\{.*\}', out, re.S)
     d = json.loads(m.group(0)) if m else {}
     names = {n for n, _ in cast}
@@ -125,8 +162,10 @@ def look(jpeg, cast, history):
     for r in riffs:
         r['line'] = str(r['line']).strip()[:90]
         if r.get('pose') not in POSES: r['pose'] = 'giggle'
-    note = d.get('note')
-    return {'seen': str(d.get('seen') or '').strip()[:120], 'riffs': riffs, 'note': str(note).strip()[:300] if note else None}
+    note, want = d.get('note'), d.get('want')
+    want = {k: str(want.get(k) or '').strip()[:300] for k in ('what', 'why', 'where')} if isinstance(want, dict) and want.get('what') else None
+    return {'seen': str(d.get('seen') or '').strip()[:120], 'detail': str(d.get('detail') or '').strip()[:900], 'riffs': riffs,
+            'note': str(note).strip()[:300] if note else None, 'want': want}
 
 
 def recap(history):
@@ -135,9 +174,46 @@ def recap(history):
     return _claude([{'type': 'text', 'text': 'Here is tonight\'s log of what was on Mark\'s screen and what the gallery said:\n\n%s\n\n'
                      'Write a short recap for his notebook in markdown: two or three sentences on what we watched, then '
                      '"Worth keeping:" with up to five bullets (ideas, inspirations, things to try), only if there are any. '
-                     'No personal details. Warm, brief.' % '\n'.join(history[-80:])}],
+                     'Each bullet names its source (title, author or site, as seen) so another Claude could find it, and '
+                     'says in a few words why it\'s worth it. No personal details. Warm, brief.' % '\n'.join(history[-60:])}],
                    'You are the Peanut Gallery, a row of chibi Claudes who watch Mark\'s screen with him and riff. '
                    'Start straight in with the recap text: no title or heading.').strip().lstrip('#').strip()
+
+
+def to_inspo(recap_text, wants):
+    """the recap's "Worth keeping" list, and the wishes, into ~/claude-inspo/peanut-gallery/ for the other Claudes"""
+    os.makedirs(INSPO, exist_ok=True)
+    rd = os.path.join(INSPO, 'README.md')
+    if not os.path.exists(rd):
+        open(rd, 'w').write(
+            "# Peanut Gallery\n\n"
+            "Nuggets from ohaiku's Peanut Gallery (`~/git/ohaiku`): a row of chibi Claudes, voiced by Haiku, who watch Mark's\n"
+            "screen with him and riff, MST3K-style. When a showing ends, Haiku writes a recap; its *Worth keeping* list lands\n"
+            "here, one file per day. `wishlist.md` is what the gallery asked to keep or see more of (\"can we get the full\n"
+            "video?\"): fetch what's worth it, into its own `YYYY-MM-DD author` folder in `~/claude-inspo` with a NOTES.md.\n\n"
+            "How they looked: still screenshots every ~15 s (the whole screen small, the front window sharper), no sound,\n"
+            "by Haiku. So these are first impressions from stills, not close study: check before you build on one.\n")
+    m = re.search(r'Worth keeping:?\**\s*\n(.*)', recap_text or '', re.S | re.I)
+    if m and m.group(1).strip():
+        f = os.path.join(INSPO, time.strftime('%Y-%m-%d') + '.md')
+        with open(f, 'a') as fh:
+            if fh.tell() == 0: fh.write('# Worth keeping, %s\n\n' % time.strftime('%A %-d %B %Y'))
+            fh.write('*From the %s showing.*\n\n%s\n\n' % (time.strftime('%H:%M'), m.group(1).strip()))
+    if wants:
+        f = os.path.join(INSPO, 'wishlist.md')
+        with open(f, 'a') as fh:
+            if fh.tell() == 0: fh.write('# The Peanut Gallery\'s wishlist\n\nTick one off (`- [x]`) once it\'s fetched or turned down.\n\n')
+            for w in wants:
+                fh.write('- [ ] **%s** (%s): %s%s\n' % (w['what'], time.strftime('%-d %b %H:%M'), w['why'], ' \u2014 ' + w['where'] if w['where'] else ''))
+
+
+def keep(jpeg):
+    """save one look's image next to the day's notes; returns its path relative to them"""
+    d = os.path.join(NOTES, time.strftime('%Y-%m-%d'))
+    os.makedirs(d, exist_ok=True)
+    name = time.strftime('%H%M%S') + '.jpg'
+    open(os.path.join(d, name), 'wb').write(jpeg)
+    return time.strftime('%Y-%m-%d') + '/' + name
 
 
 def write(entry):
