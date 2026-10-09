@@ -62,6 +62,30 @@ class Surfaces:
                 continue
         return out
 
+    def windows(self):
+        """every visible client window on this workspace, bottom to top: (id, x, y, w, h, wm_class, title)"""
+        ids = self._prop(self.root, '_NET_CLIENT_LIST_STACKING') or []
+        cur = (self._prop(self.root, '_NET_CURRENT_DESKTOP') or [0])[0]
+        UTF8, NAME = self.d.intern_atom('UTF8_STRING'), self.d.intern_atom('_NET_WM_NAME')
+        out = []
+        for wid in ids:
+            w = self.d.create_resource_object('window', wid)
+            try:
+                desk = (self._prop(w, '_NET_WM_DESKTOP') or [cur])[0]
+                if desk not in (cur, 0xFFFFFFFF): continue
+                if self.at['_NET_WM_STATE_HIDDEN'] in (self._prop(w, '_NET_WM_STATE') or []): continue
+                g = w.get_geometry(); t = w.translate_coords(self.root, 0, 0)
+                fe = self._prop(w, '_NET_FRAME_EXTENTS') or [0, 0, 0, 0]
+                x, y = -t.x - fe[0], -t.y - fe[2]
+                ww, hh = g.width + fe[0] + fe[1], g.height + fe[2] + fe[3]
+                cls = ' '.join(w.get_wm_class() or ())
+                p = w.get_full_property(NAME, UTF8)
+                title = p.value.decode('utf-8', 'replace') if p else str(w.get_wm_name() or '')
+                out.append((wid, x, y, ww, hh, cls, title))
+            except XError:
+                continue
+        return out
+
     def poll(self, top_limit=0):
         rs = self.rects()
         out = []
@@ -82,4 +106,6 @@ class Surfaces:
 
 
 if __name__ == '__main__':
-    for s in Surfaces().poll(): print(s)
+    S = Surfaces()
+    for s in S.poll(): print(s)
+    for w in S.windows(): print(w[:6])

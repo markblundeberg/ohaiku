@@ -23,6 +23,10 @@
   ohaiku --kaiju      chibi Opus, five times the size, stomps along the bottom; everyone hides (rarely by itself, too)
   ohaiku --clippy     "It looks like you're...": a balloon about your active window (now and then by itself in play)
   ohaiku --snow       petal snow (xsnow, bloomcore edition): petals pile up on your title bars; on during Bloomcore
+  ohaiku --gallery    the Peanut Gallery (off unless you ask): the free ones sit in a row along the bottom with their
+                      backs to you and watch your screen. Every ~15 s, when it has changed, a screenshot (terminals and
+                      the Claude app blacked out) goes to Haiku, which voices their quips and keeps notes of anything worth
+                      keeping in ~/.local/share/ohaiku/gallery/. Click the placard to stop; again to toggle
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray, silently (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
@@ -31,8 +35,9 @@
 Every Claude Code session on this machine that was active in the last two hours gets a chibi of its own model, with
 its name on a little plate, standing on the bottom edge of the screen and acting out what it's doing: reading, searching
 (magnifying glass), editing (the Q.E.D. stamp), running commands (the drum), thinking (a thought cloud), sending out
-subagents (seed packets; the subagents appear beside it), asking you something (waving a "?"), done (a happy bounce),
-and asleep after twenty quiet minutes. Free ones wander and play, and dance when music is playing. Bring the pointer
+subagents (seed packets; the subagents appear beside it), asking you something or waiting at a permission prompt
+(waving a "?", and saying so), done (a happy bounce), out of usage (a tea break until the limit resets), an API error
+(dizzy), and asleep after twenty quiet minutes. The little flower on each plate opens over the day's work. Free ones wander and play, and dance when music is playing. Bring the pointer
 near and they duck below the edge so only their hoods peek out. Click a name plate (or a chibi waving "?") to go to
 that session's terminal window; middle-click a plate to send that one away until its session wants you again; right-click
 for the menu. Middle-click the tray icon to hide or show everyone.
@@ -61,7 +66,12 @@ TOOL_POSE = {
     'AskUserQuestion': 'ask', 'ExitPlanMode': 'ask', 'PushNotification': 'ask',
 }
 TOOL_PREFIX = {'mcp__': 'search'}
-WORK = {'think', 'ask', 'done', 'bash', 'read', 'search', 'edit', 'agents', 'busy'}
+WORK = {'think', 'ask', 'done', 'bash', 'read', 'search', 'edit', 'agents', 'busy', 'tea', 'dizzy'}
+GAL_EVERY = 15                                        # seconds between the Peanut Gallery's looks, at most
+KINDS = ['Sunflower', 'Daisy', 'Tulip', 'Rose', 'Poppy', 'Cherry', 'Cornflower', 'Marigold', 'Lotus', 'Dandelion', 'Cosmos', 'Pansy']
+SAYS = {'permission prompt': 'may I? (permission)', 'input needed': 'a question for you', 'dialog open': 'a dialog for you',
+        'sandbox request': 'may I use the network?', 'worker request': 'a helper needs you', 'goal proposal': 'a goal for us?',
+        'AskUserQuestion': 'a question for you', 'ExitPlanMode': 'plan ready!', 'PushNotification': 'psst'}
 
 
 def running_pid():
@@ -133,11 +143,12 @@ class Chibi:
         fs = 10 if (self.agent and self.agent.kind == 'sub') else 11.5
         cr.set_font_size(fs)
         txt = self.label if len(self.label) <= 18 else self.label[:17] + '…'
+        pad = 15 if (self.agent and self.agent.kind == 'session') else 0      # room for the day's flower
         e = cr.text_extents(txt)
-        while e.x_advance + 12 > self.W - 2 and len(txt) > 4:
+        while e.x_advance + 12 + pad > self.W - 2 and len(txt) > 4:
             txt = txt[:-2] + '…'; e = cr.text_extents(txt)
-        pw, ph = e.x_advance + 12, LABEL_H - 3
-        self._plate = dict(txt=txt, fs=fs, tw=e.x_advance, th=e.height, x=(self.W - pw) / 2, y=self.foot + 1, w=pw, h=ph)
+        pw, ph = e.x_advance + 12 + pad, LABEL_H - 3
+        self._plate = dict(txt=txt, fs=fs, tw=e.x_advance, th=e.height, x=(self.W - pw) / 2, y=self.foot + 1, w=pw, h=ph, pad=pad)
         return self._plate
 
     def shape_input(self):
@@ -165,7 +176,9 @@ class Chibi:
         if a.state == 'think': return 'think'
         if a.state == 'ask': return 'ask'
         if a.state == 'done': return 'done'
-        if a.state == 'asleep': return 'sleep' if self.app.mode == 'perch' else None    # playtime wakes everyone
+        if a.state == 'asleep': return 'sleep' if self.app.mode == 'perch' and not self.app.gallery_on else None   # playtime wakes everyone
+        if a.state == 'limit': return 'tea'
+        if a.state == 'error': return 'dizzy'
         if a.state == 'tool':
             p = TOOL_POSE.get(a.tool)
             if p is None:
@@ -198,7 +211,7 @@ class Chibi:
         d = math.hypot(dx, dy)
         want = self.work()
         if s == 'sleep':
-            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.agent is None or self.app.mode != 'perch'): self.set('wake')
+            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.agent is None or self.app.mode != 'perch' or self.app.gallery_on): self.set('wake')
             return
         if s == 'wake':
             if self.done_anim(): self.set('alert')
@@ -225,7 +238,14 @@ class Chibi:
             self.set('runF' if abs(dy) > abs(dx) * 1.4 else ('runR' if dx > 0 else 'runL')); return
         if want == 'sleep': self.set('yawn'); return
         if want: self.set(want); return
-        # free: play
+        # free: play (or, with the Peanut Gallery on, sit in the row and watch the screen)
+        if self.app.gallery_seats():
+            self.wander, rc = 0.0, getattr(self, 'react', None)
+            if rc and time.time() < rc[1]: pose = 'g' + rc[0]
+            elif self.state == 'gmunch' and self.t < 6: pose = 'gmunch'
+            else: pose = 'gmunch' if random.random() < dt / 45 else 'gwatch'
+            if pose != self.state: self.set(pose)
+            return
         self.rest += dt
         if self.app.music or self.app.mode == 'bloomcore': self.set('dance'); return
         if s in WORK: self.set('idle'); s = 'idle'
@@ -252,7 +272,7 @@ class Chibi:
     def tick_draw(self):
         self.place()
         if self.label and getattr(self, 'calling', None) is not None and self.calling != (self.agent.state == 'ask'): self.shape_input()
-        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None, round(self.shrink, 2))
+        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None, round(self.shrink, 2), self.bloom())
         if key != self.shown:
             self.shown = key; self.win.queue_draw()
 
@@ -275,17 +295,33 @@ class Chibi:
         if self.label and self.shrink > .98 and self.state not in ('leap', 'fall'): self.draw_label(cr, floor)
         return True
 
+    def bloom(self):
+        """which frame of its flower the plate shows: bud at the first minute of work today, full bloom at four hours"""
+        a = self.agent
+        if not a or a.kind != 'session' or getattr(a, 'today', 0) < 60: return None
+        return int(round(11 * min(1, math.sqrt(a.today / (4 * 3600)))))
+
     def draw_label(self, cr, floor):
         a, P = self.agent, self.plate()
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(P['fs'])
         x0, y0, pw, ph = P['x'], P['y'], P['w'], P['h']
-        tone = {'ask': (.82, .9, 1), 'done': (.86, .96, .82), 'asleep': (.9, .88, .86)}.get(a.state if a else '', (1, .98, .95))
+        tone = {'ask': (.82, .9, 1), 'done': (.86, .96, .82), 'asleep': (.9, .88, .86), 'limit': (.9, .87, 1), 'error': (1, .86, .84)}.get(a.state if a else '', (1, .98, .95))
         r = ph / 2
         cr.new_path(); cr.arc(x0 + r, y0 + r, r, math.pi / 2, 3 * math.pi / 2); cr.arc(x0 + pw - r, y0 + r, r, -math.pi / 2, math.pi / 2); cr.close_path()
         cr.set_source_rgba(*tone, .92); cr.fill_preserve()
         cr.set_source_rgba(.29, .17, .11, .8); cr.set_line_width(1.2); cr.stroke()
         cr.set_source_rgba(.29, .17, .11, .55 if (a and a.state == 'asleep') else 1)
-        cr.move_to(self.W / 2 - P['tw'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); cr.show_text(P['txt'])
+        cr.move_to(self.W / 2 - P['tw'] / 2 + P['pad'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); cr.show_text(P['txt'])
+        if not P['pad']: return
+        b, cx = self.bloom(), x0 + 10
+        if b is None:                                       # no work yet today: a seed
+            cr.set_source_rgba(.45, .3, .16, .8); cr.new_path(); cr.save(); cr.translate(cx, y0 + ph / 2); cr.scale(1, .7); cr.arc(0, 0, 2.6, 0, 7); cr.restore(); cr.fill()
+            return
+        k = 'bloom%02d' % (int(''.join(ch for ch in self.who if ch.isdigit()) or 0) % 12)   # the day's work, opening
+        if k not in Flower.surf: Flower.surf[k] = cairo.ImageSurface.create_from_png(os.path.join(SHARE, 'blooms', k + '.png'))
+        img = Flower.surf[k]; px = img.get_height(); z = 34 / px
+        cr.save(); cr.translate(cx - 17, y0 + ph - 34 * .9); cr.scale(z, z)
+        cr.set_source_surface(img, -b * px, 0); cr.rectangle(0, 0, px, px); cr.clip(); cr.paint(); cr.restore()
 
 class Plane:
     """a paper airplane: one session's SendMessage, flying from its chibi to the recipient's (or off the top)"""
@@ -839,6 +875,98 @@ class Balloon:
         return True
 
 
+class Speech:
+    """a comic speech bubble over a chibi: a quip from the Peanut Gallery, or an agent saying what it needs"""
+
+    def __init__(self, app, who, text, life=5.0):
+        self.app, self.who, self.t, self.life = app, who, 0.0, life
+        words, lines = text.split(), ['']
+        for w_ in words:
+            if lines[-1] and len(lines[-1]) + 1 + len(w_) > 30: lines.append(w_)
+            else: lines[-1] = (lines[-1] + ' ' + w_).strip()
+        self.lines = lines[:4]
+        cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12.5)
+        self.W = int(max(cr.text_extents(l).x_advance for l in self.lines) + 26)
+        self.H = 16 * len(self.lines) + 16 + 14
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(self.W, self.H)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        self.place()
+        if not app.hidden and not app.locked: w.show_all()
+
+    def place(self):
+        c, wa = self.who, self.app.workarea()
+        self.tail = self.W * .5
+        x = c.x - self.W / 2
+        x2 = min(max(x, wa.x + 4), wa.x + wa.width - self.W - 4); self.tail += x - x2
+        self.tail = min(max(self.tail, 14), self.W - 14)
+        y = c.y - c.foot * .92 - self.H
+        for o in self.app.speeches:                        # stack over an earlier bubble rather than cover it
+            if o is self: break
+            if getattr(o, 'at', None) and o.at[0] < x2 + self.W and x2 < o.at[0] + o.W and y < o.at[1] + o.H - 12 and o.at[1] < y + self.H:
+                y = o.at[1] - self.H + 12
+        self.at = (x2, y)
+        self.win.move(int(x2), int(y))
+
+    def tick(self, dt):
+        self.t += dt; self.place()
+        if self.t > self.life or self.who.gone: self.win.destroy(); return False
+        return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        W, H, r, tx = self.W - 2, self.H - 14, 12, self.tail
+        cr.new_path(); cr.arc(1 + r, 1 + r, r, math.pi, 1.5 * math.pi); cr.arc(W - r, 1 + r, r, 1.5 * math.pi, 0)
+        cr.arc(W - r, H - r, r, 0, .5 * math.pi); cr.line_to(tx + 8, H); cr.line_to(tx - 2, H + 12); cr.line_to(tx - 6, H)
+        cr.arc(1 + r, H - r, r, .5 * math.pi, math.pi); cr.close_path()
+        cr.set_source_rgba(1, .98, .95, .97); cr.fill_preserve(); cr.set_source_rgba(.29, .17, .11, .9); cr.set_line_width(2); cr.stroke()
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12.5)
+        cr.set_source_rgb(.29, .17, .11)
+        for i, l in enumerate(self.lines):
+            cr.move_to(13, 21 + 16 * i); cr.show_text(l)
+        return True
+
+
+class Placard:
+    """the Peanut Gallery's sign at the end of the row: says it's watching (the dot lights when it looks); click it to stop"""
+
+    def __init__(self, app):
+        self.app, self.W, self.H, self.blink, self.shown = app, 150, 24, 0.0, None
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(self.W, self.H)
+        w.connect('draw', self.draw)
+        w.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        w.connect('button-press-event', lambda *_: (app.gallery(False), True)[1])
+        w.set_tooltip_text('The Peanut Gallery is watching your screen (Haiku). Click to stop.')
+        if not app.hidden and not app.locked: w.show_all()
+
+    def tick(self, dt, x, y):
+        self.blink = max(0.0, self.blink - dt)
+        self.win.move(int(x - self.W), int(y - self.H))
+        k = round(self.blink, 1)
+        if k != self.shown: self.shown = k; self.win.queue_draw()
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        W, H, r = self.W - 2, self.H - 2, 9
+        cr.new_path(); cr.arc(1 + r, 1 + r, r, math.pi, 1.5 * math.pi); cr.arc(W - r, 1 + r, r, 1.5 * math.pi, 0)
+        cr.arc(W - r, H - r, r, 0, .5 * math.pi); cr.arc(1 + r, H - r, r, .5 * math.pi, math.pi); cr.close_path()
+        cr.set_source_rgba(.165, .08, .086, .94); cr.fill_preserve(); cr.set_source_rgba(.85, .47, .34, .9); cr.set_line_width(1.5); cr.stroke()
+        a = .35 + .65 * min(1, self.blink / .6)
+        cr.set_source_rgba(.92, .2, .2, a); cr.arc(14, self.H / 2, 4.5, 0, 7); cr.fill()
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(10.5)
+        cr.set_source_rgb(1, .93, .8); cr.move_to(25, self.H / 2 + 4); cr.show_text('PEANUT GALLERY')
+        return True
+
+
 class App:
     def __init__(self, a):
         self.scale, self.quiet = a.scale, a.quiet
@@ -864,6 +992,8 @@ class App:
         self.cascades, self.busy_since = [], {}                                    # solitaire wins
         self.flyers, self.idle_s, self.saver_after = [], 0.0, a.saver * 60         # flying haikus
         self.kaiju, self.last_clippy = None, time.time()
+        self.gallery_on, self.gal_gen, self.gal_cast, self.gal_hist, self.placard = False, 0, [], [], None   # peanut gallery
+        self.speeches, self.said, self.gal_skip, self.gal_hide = [], {}, [], []
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -939,9 +1069,12 @@ class App:
             for f in self.flyers: f.win.destroy()
             self.flyers = []
         if self.snow: (self.snow.win.hide() if v else (not self.hidden and self.snow.win.show_all()))
-        for c in self.everyone():
+        for c in self.everyone() + ([self.placard] if self.placard else []):
             if v: c.win.hide()
             elif not self.hidden: c.win.show_all()
+        if v:
+            for b in self.speeches: b.win.destroy()
+            self.speeches = []
         return False
 
     def set_music(self, m):
@@ -999,6 +1132,14 @@ class App:
                         and self.studying is None and not self.cascades:
                     self.cascades.append(Cascade(self, c))
         for c in new: c.x = c.slot; c.place()            # bloom where they'll stand
+        for a in res:                                     # say what it needs, once, when that starts
+            key = (a.state, a.tool) if a.state in ('ask', 'limit', 'error') else None
+            if key != self.said.get(a.id):
+                self.said[a.id] = key
+                c = self.agents.get(a.id)
+                if key and c and c.state != 'spawn' and not self.hidden and not self.locked:
+                    txt = SAYS.get(a.tool, a.tool or '?') if a.state == 'ask' else ('tea break: %s' % a.tool if a.state == 'limit' else 'oof: %s' % a.tool)
+                    self.speak(c, txt, 8.0)
         return False
 
     # -- where everyone stands ---------------------------------------------------------------------------
@@ -1053,6 +1194,8 @@ class App:
         if self.studying is not None: self.study_tick(dt); return True
         self.detect_shake(cx)
         self.balloons = [b for b in self.balloons if b.tick(dt)]
+        self.speeches = [b for b in self.speeches if b.tick(dt)]
+        if self.gallery_on: self.gallery_tick(dt)
         self.flowers = [f for f in self.flowers if f.tick(dt)]
         self.planes = [p for p in self.planes if p.tick(dt)]
         self.cascades = [k for k in self.cascades if k.tick(dt)]
@@ -1103,7 +1246,7 @@ class App:
     def keep_on_top(self):
         self.tk += 1
         if self.tk % (HZ * 2) == 0 and not self.hidden:
-            for c in ([self.snow] if self.snow else []) + ([self.lemov] if self.lemov else []) + self.everyone() + self.balloons:
+            for c in ([self.snow] if self.snow else []) + ([self.lemov] if self.lemov else []) + self.everyone() + self.balloons + self.speeches + ([self.placard] if self.placard else []):
                 gw = c.win.get_window()
                 if gw: gw.raise_()
 
@@ -1361,6 +1504,116 @@ class App:
             c.duck = 0
             c.tick_draw()
 
+    def speak(self, c, text, life=5.0):
+        self.speeches = [b for b in self.speeches if not (b.who is c and (b.win.destroy() or True))]
+        self.speeches.append(Speech(self, c, text, life))
+
+    # -- the Peanut Gallery: they watch your screen, and Haiku does the voices ------------------------------
+    def gallery_seats(self):
+        return self.gallery_on and self.mode == 'perch' and not self.hidden
+
+    def cast_name(self, c):
+        if c.label: return c.label
+        if not getattr(c, 'castname', None):
+            n = int(''.join(ch for ch in c.who if ch.isdigit()) or 0)
+            base = 'Opus' if c.who.startswith('opus') else KINDS[n % 12]
+            taken = {getattr(o, 'castname', None) for o in self.everyone()}
+            nm, i = base, 2
+            while nm in taken: nm, i = '%s %d' % (base, i), i + 1
+            c.castname = nm
+        return c.castname
+
+    def cast_map(self):
+        """who's watching: the free ones in the row (perch), and the theater's audience"""
+        m, skip = {}, self.gal_skip
+        if self.mode == 'perch':
+            for c in self.order():
+                if c.gone or c.state == 'spawn' or (c.agent is not None and c.work() is not None): continue
+                if c.agent is not None and any(k in (c.agent.name + ' ' + c.agent.cwd).lower() for k in skip): continue   # not in the cast
+                m[self.cast_name(c)] = c
+        for c in self.audience: m[self.cast_name(c)] = c
+        return m
+
+    def gallery(self, on=None):
+        on = not self.gallery_on if on is None else on
+        if on == self.gallery_on: return
+        self.gallery_on = on; self.gal_gen += 1
+        if on:
+            import gallery; self.gal_hist, self.gal_skip = [], gallery.skip_words()
+            self.placard = Placard(self)
+            threading.Thread(target=self.gallery_loop, args=(self.gal_gen,), daemon=True).start()
+        else:
+            if self.placard: self.placard.win.destroy(); self.placard = None
+            for c in self.everyone():
+                if c.state.startswith('g'): c.set('alert')
+        if getattr(self, 'gal_item', None) and self.gal_item.get_active() != on:
+            self.menu_lock = True; self.gal_item.set_active(on); self.menu_lock = False
+
+    def gallery_tick(self, dt):
+        if self.tk % (HZ * 10) == 0:
+            import gallery; self.gal_skip = gallery.skip_words()
+        if self.tk % 6 == 0:                               # skipped sessions' own chibis and plates: blacked out too
+            self.gal_hide = [(int(c.x - c.W / 2) - 4, int(c.y - c.foot) - 4, c.W + 8, c.H + 8) for c in self.agents.values()
+                             if any(k in (c.agent.name + ' ' + c.agent.cwd).lower() for k in self.gal_skip)]
+        if self.tk % HZ == 0:
+            self.gal_cast = [(n, 'Opus 5.5' if c.who.startswith('opus') else 'Haiku 5.5') for n, c in self.cast_map().items()]
+        if self.placard:
+            row = [c for c in self.order() if not c.gone]
+            x = min([c.slot - c.cpx * .45 for c in row] + [self.workarea().x + self.workarea().width - 40]) - 8
+            self.placard.tick(dt, x, self.floor() + LABEL_H - 1)
+
+    def gallery_loop(self, gen):
+        import gallery, world
+        S = world.Surfaces()
+        W, H = S.d.screen().width_in_pixels, S.d.screen().height_in_pixels
+        last_thumb, last_sent, hist, wait = None, 0.0, self.gal_hist, GAL_EVERY
+        live = lambda: self.gallery_on and self.gal_gen == gen
+        while live():
+            time.sleep(1)
+            if self.hidden or self.locked or self.studying is not None or not self.gal_cast or self.mode != 'perch' and not self.audience: continue
+            if time.time() - last_sent < wait: continue
+            try:
+                jpg, th = gallery.capture(W, H, gallery.private_rects(S.windows()) + list(self.gal_hide))
+            except Exception as e:
+                print('ohaiku: gallery capture:', e, file=sys.stderr); last_sent, wait = time.time(), 60; continue
+            if gallery.changed(th, last_thumb) < 2.0 and time.time() - last_sent < 300: continue     # nothing new on screen
+            last_thumb, last_sent, wait = th, time.time(), GAL_EVERY
+            GLib.idle_add(lambda: (self.placard and setattr(self.placard, 'blink', 1.0), False)[1])
+            try:
+                res = gallery.look(jpg, list(self.gal_cast), hist)
+            except Exception as e:
+                print('ohaiku: gallery:', e, file=sys.stderr); wait = 60; continue
+            if not live(): break
+            hist.append('%s seen: %s' % (time.strftime('%H:%M'), res['seen']) + ''.join(' | %s: "%s"' % (r['who'], r['line']) for r in res['riffs']))
+            try:
+                gallery.write('**%s** %s' % (time.strftime('%H:%M'), res['seen']) + ''.join('\n> **%s:** %s' % (r['who'], r['line']) for r in res['riffs'])
+                              + ('\n\n\u270e %s' % res['note'] if res['note'] else ''))
+            except OSError: pass
+            GLib.idle_add(self.gallery_result, res)
+        if self.gal_gen == gen + 1 and not self.gallery_on and len(hist) >= 3:       # turned off (not quit): a recap for the notebook
+            try: gallery.write('## Recap, %s\n\n%s' % (time.strftime('%H:%M'), gallery.recap(hist)))
+            except Exception as e: print('ohaiku: gallery recap:', e, file=sys.stderr)
+
+    def gallery_result(self, res):
+        cast = self.cast_map()
+        for i, r in enumerate(res['riffs']):
+            c = cast.get(r['who'])
+            if c: GLib.timeout_add(int(i * 2800) + 1, self.riff, c, r['pose'], r['line'])
+        if res['note'] and cast:
+            c = random.choice(list(cast.values()))
+            GLib.timeout_add(len(res['riffs']) * 2800 + 400, self.riff, c, 'whisper', '\u270e noted: ' + res['note'][:80])
+        return False
+
+    def riff(self, c, pose, line):
+        if c.gone or self.hidden or self.locked: return False
+        life = 3.2 + len(line) / 16
+        if c in self.audience:
+            c.set({'gasp': 'giggle', 'cheer': 'giggle'}.get(pose, pose)); c.next_fidget = time.time() + life
+        else:
+            c.react = (pose, time.time() + min(life, 4.5))
+        self.speak(c, line, life)
+        return False
+
     def balloon(self, c, title, body='', life=4.0):
         self.balloons = [b for b in self.balloons if not (b.who is c and (b.win.destroy() or True))]
         self.balloons.append(Balloon(self, c, title, body, life))
@@ -1521,6 +1774,9 @@ class App:
         if self.studying is not None: return
         self.studying = 0.0; self.shake = []
         self.vac_to = self.tray_point()
+        self.gallery(False)                               # (and stop looking at the screen)
+        for b in self.speeches: b.win.destroy()
+        self.speeches = []
         if self.theater: self.theater.win.hide()
         for c in self.everyone():
             c.arc, c.falling, c.goal = None, False, None
@@ -1604,6 +1860,7 @@ class App:
         item('Lemmings', lambda: self.set_mode('lemmings'))
         if self.game: item('Oh No! (nuke the lemmings)', self.oh_no)
         item('Movie Night', self.movie)
+        item('Stop the Peanut Gallery' if self.gallery_on else 'Peanut Gallery (Haiku watches your screen)', self.gallery)
         item('Petal Snow', self.toggle_snow)
         item('Flying Haikus', lambda: self.flying(not self.flyers))
         item('Kaiju', self.stomp)
@@ -1654,12 +1911,16 @@ class App:
             for f in self.flyers: f.win.destroy()
             self.flyers = []
             if self.kaiju: self.kaiju.win.destroy(); self.kaiju = None
+            for b in self.speeches: b.win.destroy()
+            self.speeches = []
+            if self.placard: self.placard.win.hide()
         elif m == 'show':
             self.hidden = False
             for c in self.everyone(): c.win.show_all()
             if self.theater: self.theater.show()
             if self.snow: self.snow.win.show_all()
             if self.lemov: self.lemov.win.show_all()
+            if self.placard: self.placard.win.show_all()
         else:
             if m == 'play': m = 'follow'
             if m in ('recess', 'bloomcore', 'lemmings') and not self.world_ok: m = 'perch'
@@ -1700,6 +1961,7 @@ class App:
             elif c == 'fly': self.flying(not self.flyers)
             elif c == 'kaiju': self.stomp()
             elif c == 'clippy': self.clippy()
+            elif c == 'gallery': self.gallery()
             elif c == 'cascade':                          # (for testing: a pretend long finish)
                 cs = [x for x in self.agents.values() if not x.gone]
                 if cs: self.cascades.append(Cascade(self, random.choice(cs)))
@@ -1728,6 +1990,9 @@ class App:
             m.append(r); self.radios[key] = r
         item('Oh No! (nuke the lemmings)', self.oh_no)
         item('Movie Night', self.movie)
+        self.gal_item = Gtk.CheckMenuItem(label='Peanut Gallery (Haiku watches your screen)')
+        self.gal_item.connect('toggled', lambda w: not self.menu_lock and self.gallery(w.get_active())); m.append(self.gal_item)
+        item('Open the Gallery Notes', lambda: subprocess.Popen(['xdg-open', os.path.expanduser('~/.local/share/ohaiku/gallery')]) if os.path.isdir(os.path.expanduser('~/.local/share/ohaiku/gallery')) else None)
         item('Petal Snow', self.toggle_snow)
         item('Flying Haikus', lambda: self.flying(not self.flyers))
         item('Kaiju', self.stomp)
@@ -1753,6 +2018,7 @@ class App:
         self.menu_lock = False
 
     def quit(self):
+        self.gallery_on = False
         if self.theater: self.theater.close()
         try: os.unlink(PIDF)
         except OSError: pass
@@ -1765,7 +2031,7 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--saver', type=float, default=5, help='minutes idle before the Flying Haikus (0: never)')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
@@ -1773,7 +2039,7 @@ def main():
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade') if getattr(a, m)]
+    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery') if getattr(a, m)]
     pid = running_pid()
     if a.quit or a.restart:
         if pid:
@@ -1803,7 +2069,7 @@ def main():
     sys.path.insert(0, HERE)
     app = App(a)
     for m in modes: app.study() if m == 'studying' else app.movie() if m == 'movie' else app.toggle_snow() if m == 'snow' else app.oh_no() if m == 'ohno' else \
-        app.flying(True) if m == 'fly' else app.stomp() if m == 'kaiju' else app.clippy() if m == 'clippy' else app.set_mode(m)
+        app.flying(True) if m == 'fly' else app.stomp() if m == 'kaiju' else app.clippy() if m == 'clippy' else app.gallery(True) if m == 'gallery' else app.set_mode(m)
     Gtk.main()
 
 

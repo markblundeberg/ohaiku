@@ -17,7 +17,7 @@ for (const w of who) {
   const name = typeof w === 'string' ? w : `haiku${String(w).padStart(2, '0')}`;
   fs.mkdirSync(path.join(out, name), { recursive: true });
   for (const [st, png] of Object.entries(strips)) fs.writeFileSync(path.join(out, name, st + '.png'), Buffer.from(png.split(',')[1], 'base64'));
-  index[name] = meta; console.log(name, Object.keys(strips).length + ' states');
+  index[name] = index[name] && arg('states', '') ? { ...index[name], states: { ...index[name].states, ...meta.states } } : meta; console.log(name, Object.keys(strips).length + ' states');
 }
 fs.writeFileSync(path.join(out, 'sheets.json'), JSON.stringify(index, null, 1));
 if (!arg('states', '')) { // the blooms

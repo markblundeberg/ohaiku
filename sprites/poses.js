@@ -125,15 +125,18 @@ function ohStates(who) {
   const seat = (g, i, o = {}) => {
     const t = i / 12, bob = o.bob ?? 2.5 * Math.sin(i / 24 * Math.PI * 4), sh = o.shake || 0;
     g.save(); g.translate(sh, bob);
-    H(g, { t, move: 'idle', beat: 0, yaw: o.yaw ?? Math.PI, blink: 0 }, 0, 0);
-    // headphones over the hood
+    H(g, { t, move: 'idle', beat: 0, yaw: o.yaw ?? Math.PI, blink: 0, ...(o.arms ? { arms: o.arms } : {}) }, 0, 0);
+    if (o.bang) ohBang(g, 84, -262, o.bang);
+    // headphones over the hood (not in the gallery: there they're watching your screen, not a film)
     const hx = 0, hy = -196;
+    if (o.phones !== false) {
     g.lineCap = 'round'; g.strokeStyle = '#2b2b33'; g.lineWidth = 11;
     g.beginPath(); g.arc(hx, hy + 6, 82, Math.PI * 1.12, Math.PI * 1.88); g.stroke();
     g.strokeStyle = '#55556a'; g.lineWidth = 3.5; g.beginPath(); g.arc(hx, hy + 6, 82, Math.PI * 1.2, Math.PI * 1.5); g.stroke();
     for (const sd of [-1, 1]) {
       g.fillStyle = '#2b2b33'; g.beginPath(); g.roundRect(hx + sd * 84 - 13, hy - 18, 26, 46, 11); g.fill();
       g.fillStyle = '#d97757'; g.beginPath(); g.roundRect(hx + sd * 84 - 6, hy - 10, 12, 30, 6); g.fill();
+    }
     }
     if (o.popcorn) {                                   // a striped bucket on the armrest, and a kernel on its way up
       const bx = 74, by = -120;
@@ -157,6 +160,23 @@ function ohStates(who) {
   S.munch = { fps: 12, loop: true, n: 24, f: (g, i) => seat(g, i, { popcorn: true }) };
   S.giggle = { fps: 12, loop: true, n: 12, f: (g, i) => seat(g, i, { bob: -3 + 4 * (i % 2), shake: (i % 2 ? 3 : -3), yaw: Math.PI * .9 }) };
   S.whisper = { fps: 12, loop: false, n: 24, f: (g, i) => seat(g, i, { bob: 0, yaw: Math.PI - .55 * Math.sin(Math.PI * Math.min(1, i / 20)) }) };
+  // --- the peanut gallery: the same row, along the bottom of your screen, watching whatever you're doing ---
+  const G = { phones: false };
+  S.gwatch = { fps: 12, loop: true, n: 24, f: (g, i) => seat(g, i, G) };
+  S.gmunch = { fps: 12, loop: true, n: 24, f: (g, i) => seat(g, i, { ...G, popcorn: true }) };
+  S.ggiggle = { fps: 12, loop: true, n: 12, f: (g, i) => seat(g, i, { ...G, bob: -3 + 4 * (i % 2), shake: (i % 2 ? 3 : -3), yaw: Math.PI * .9 }) };
+  S.gwhisper = { fps: 12, loop: false, n: 24, f: (g, i) => seat(g, i, { ...G, bob: 0, yaw: Math.PI - .55 * Math.sin(Math.PI * Math.min(1, i / 20)) }) };
+  S.ggasp = { fps: 12, loop: false, n: 14, f: (g, i) => seat(g, i, { ...G, bob: -22 * Math.sin(Math.PI * Math.min(1, i / 6)) * (i < 6 ? 1 : .25), shake: i > 6 ? (i % 2 ? 2 : -2) : 0,
+    arms: [[30, -30, 20], [30, -30, 20]], bang: clamp(i / 3) * 1.1 }) };
+  S.gcheer = { fps: 12, loop: true, n: 12, f: (g, i) => { const u = Math.sin(i / 12 * Math.PI * 4);
+    seat(g, i, { ...G, bob: -6 - 6 * u, arms: [[36, -62 + 10 * u, 0], [36, -62 - 10 * u, 0]] }); } };
+  // --- out of usage until the limit resets: a tea break ---
+  S.tea = { fps: 12, loop: true, n: 36, f: (g, i) => {
+    const t = i / 12, sip = i >= 24 && i < 32;
+    H(g, { t, move: 'idle', beat: 0, expr: 'neutral', eyes: 'closed', mouth: sip ? 'o' : 'cat', blink: 0,
+      arms: [[14, 40, 6], sip ? [-6, -6, 40] : [6, 10, 40]] });
+    ohTea(g, sip ? 8 : 26, sip ? -150 : -128, i / 36);
+  } };
   // --- agent work: what the session is doing right now ---
   const beatAt = (i, step = .125) => i * step;
   S.think = { fps: 13.33, loop: true, n: 32, f: (g, i) => {
@@ -201,6 +221,23 @@ function ohThink(g, x, y, u) {
   g.stroke(); g.fill();
   const n = Math.floor(u * 4) % 4;
   g.fillStyle = '#4a2c1c'; for (let i = 0; i < 3; i++) { g.globalAlpha = i < n ? 1 : .2; g.beginPath(); g.arc(x - 18 + i * 18, y + 4, 5.5, 0, 7); g.fill(); }
+  g.restore();
+}
+// a teacup, and steam curling up from it
+function ohTea(g, x, y, u) {
+  g.save(); g.translate(x, y);
+  g.strokeStyle = 'rgba(120,110,100,.55)'; g.lineWidth = 4; g.lineCap = 'round';
+  for (let k = 0; k < 2; k++) {
+    const v = (u * 2 + k * .5) % 1; g.globalAlpha = Math.sin(Math.PI * v);
+    g.beginPath(); for (let j = 0; j <= 10; j++) { const yy = -30 - 50 * v - j * 5; g.lineTo(-6 + k * 12 + 7 * Math.sin(j * .8 + u * 12 + k * 2), yy); } g.stroke();
+  }
+  g.globalAlpha = 1; g.lineWidth = 4; g.strokeStyle = '#4a2c1c'; g.lineJoin = 'round';
+  g.beginPath(); g.ellipse(26, -8, 12, 10, 0, -Math.PI * .6, Math.PI * .6); g.stroke();                 // handle
+  g.beginPath(); g.moveTo(-26, -24); g.lineTo(26, -24); g.quadraticCurveTo(24, 10, 0, 12); g.quadraticCurveTo(-24, 10, -26, -24); g.closePath();
+  g.fillStyle = '#fffaf3'; g.fill(); g.stroke();
+  g.fillStyle = '#d97757'; g.fillRect(-22, -12, 44, 7);                                                 // a clay band
+  g.beginPath(); g.ellipse(0, -24, 26, 6, 0, 0, 7); g.fillStyle = '#a8703c'; g.fill(); g.stroke();       // the tea
+  g.beginPath(); g.ellipse(0, 16, 36, 7, 0, 0, 7); g.fillStyle = '#fffaf3'; g.fill(); g.stroke();        // saucer
   g.restore();
 }
 // a "?" in a speech bubble: the agent wants you
@@ -314,5 +351,15 @@ function testSheet3() {
   [Math.PI].forEach((yaw, j) => {
     g.save(); g.translate((j + 3) * cell + cell / 2, OH.footU * s); g.scale(s, s); drawHaiku(g, 0, 0, 1, { t: 0, persona: 'opus', variant: 2, move: 'idle', beat: 0, yaw }); g.restore();
   });
+  return c;
+}
+
+function testSheet6() {
+  const s = .5, cell = OH.cellU * s, names = [['gwatch', 5], ['gmunch', 6], ['ggiggle', 3], ['ggasp', 4], ['gcheer', 3], ['tea', 4], ['tea', 26]];
+  const c = document.createElement('canvas'); c.width = cell * names.length; c.height = cell * 2;
+  const g = c.getContext('2d'); g.fillStyle = '#e8e4dc'; g.fillRect(0, 0, c.width, c.height);
+  [0, 'opus2'].forEach((who, row) => { const S = ohStates(who); names.forEach(([n, f], j) => {
+    g.save(); g.translate(j * cell + cell / 2, row * cell + OH.footU * s); g.scale(s, s); S[n].f(g, f); g.restore();
+    g.font = '16px sans-serif'; g.fillStyle = '#555'; g.fillText(n, j * cell + 6, row * cell + 18); }); });
   return c;
 }
