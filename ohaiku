@@ -140,7 +140,7 @@ class Chibi:
         if a.state == 'think': return 'think'
         if a.state == 'ask': return 'ask'
         if a.state == 'done': return 'done'
-        if a.state == 'asleep': return 'sleep'
+        if a.state == 'asleep': return 'sleep' if self.app.mode == 'perch' else None    # playtime wakes everyone
         if a.state == 'tool':
             p = TOOL_POSE.get(a.tool)
             if p is None:
