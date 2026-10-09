@@ -32,7 +32,10 @@ Claude Code). One honest limit: a tool call is only written to the transcript wh
 the chibi shows the last tool used, and a tool waiting for your permission looks like a tool running. Claude Code hooks
 could report both exactly; that would mean adding hooks to `~/.claude/settings.json`, so it isn't done.
 
-Bring the pointer near the edge and they duck so only their hoods peek out. The tray icon (after Plus! Dancer's) has
+Bring the pointer near the edge and they duck so only their hoods peek out. The name plates are the only part that
+takes clicks: **click a plate** to send that one (and its subagents) away until its session wants you again, by asking
+something or finishing a turn; **right-click a plate** for the menu. **Middle-click the tray icon** to hide or show
+everyone (`ohaiku --toggle` does the same, for a hotkey). The tray icon (after Plus! Dancer's) has
 Load Up Haiku / Load Up Opus, Play / Perch / Hide, Dance Only When Music Plays, Show Agents, and Haikus, Go Home.
 Left-click it to switch between Play and Perch.
 

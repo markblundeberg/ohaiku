@@ -7,7 +7,7 @@
   ohaiku --opus       load up a chibi Opus
   ohaiku --play       everyone chases the pointer in a line
   ohaiku --perch      everyone back to the bottom edge, out of the way (the default)
-  ohaiku --hide       vanish (they keep watching); --show to come back
+  ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
   ohaiku --quit       Haikus, go home
 
@@ -16,7 +16,9 @@ its name on a little plate, standing on the bottom edge of the screen and acting
 (magnifying glass), editing (the Q.E.D. stamp), running commands (the drum), thinking (a thought cloud), sending out
 subagents (seed packets; the subagents appear beside it), asking you something (waving a "?"), done (a happy bounce),
 and asleep after twenty quiet minutes. Free ones wander and play, and dance when music is playing. Bring the pointer
-near and they duck below the edge so only their hoods peek out. The tray icon has the same controls.
+near and they duck below the edge so only their hoods peek out. Click a name plate to send that one away until its
+session wants you again (asks something or finishes a turn); right-click a plate for the menu. The tray icon has the
+same menu; middle-click it to hide or show everyone.
 
 X11 with a compositor. Every window is click-through.
 """
@@ -93,12 +95,39 @@ class Chibi:
         w.set_default_size(self.W, self.H); w.resize(self.W, self.H)
         w.set_accept_focus(False)
         w.connect('draw', self.draw)
-        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))   # click-through
+        w.connect('realize', lambda *_: self.shape_input())
+        w.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        w.connect('button-press-event', self.clicked)
         self.place()
         if not app.hidden: w.show_all()
 
     @property
     def foot(self): return self.m['foot'][1] * self.sc
+
+    # -- the name plate: the only part that takes clicks ------------------------------------------------
+    def plate(self):
+        if getattr(self, '_plate', None): return self._plate
+        cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        fs = 10 if (self.agent and self.agent.kind == 'sub') else 11.5
+        cr.set_font_size(fs)
+        txt = self.label if len(self.label) <= 18 else self.label[:17] + '…'
+        e = cr.text_extents(txt)
+        while e.x_advance + 12 > self.W - 2 and len(txt) > 4:
+            txt = txt[:-2] + '…'; e = cr.text_extents(txt)
+        pw, ph = e.x_advance + 12, LABEL_H - 3
+        self._plate = dict(txt=txt, fs=fs, tw=e.x_advance, th=e.height, x=(self.W - pw) / 2, y=self.foot + 1, w=pw, h=ph)
+        return self._plate
+
+    def shape_input(self):
+        if not self.label: self.win.input_shape_combine_region(cairo.Region()); return    # pets: click-through
+        P = self.plate(); r = cairo.RectangleInt(int(P['x']), int(P['y']), int(P['w']) + 1, int(P['h']) + 1)
+        self.win.input_shape_combine_region(cairo.Region(r))
+
+    def clicked(self, w, ev):
+        if ev.button == 1: self.app.dismiss(self)
+        elif ev.button == 3 and getattr(self.app, 'menu', None): self.app.menu.popup_at_pointer(ev)
+        return True
 
     # -- what it would like to be doing when it isn't running somewhere --------------------------------
     def work(self):
@@ -214,29 +243,23 @@ class Chibi:
         return True
 
     def draw_label(self, cr, floor):
-        a = self.agent
-        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(10 if (a and a.kind == 'sub') else 11.5)
-        txt = self.label if len(self.label) <= 18 else self.label[:17] + '…'
-        e = cr.text_extents(txt)
-        while e.x_advance + 12 > self.W - 2 and len(txt) > 4:
-            txt = txt[:-2] + '…'; e = cr.text_extents(txt)
-        pw, ph = e.x_advance + 12, LABEL_H - 3
-        x0, y0 = (self.W - pw) / 2, floor + 1
+        a, P = self.agent, self.plate()
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(P['fs'])
+        x0, y0, pw, ph = P['x'], P['y'], P['w'], P['h']
         tone = {'ask': (.82, .9, 1), 'done': (.86, .96, .82), 'asleep': (.9, .88, .86)}.get(a.state if a else '', (1, .98, .95))
         r = ph / 2
         cr.new_path(); cr.arc(x0 + r, y0 + r, r, math.pi / 2, 3 * math.pi / 2); cr.arc(x0 + pw - r, y0 + r, r, -math.pi / 2, math.pi / 2); cr.close_path()
         cr.set_source_rgba(*tone, .92); cr.fill_preserve()
         cr.set_source_rgba(.29, .17, .11, .8); cr.set_line_width(1.2); cr.stroke()
         cr.set_source_rgba(.29, .17, .11, .55 if (a and a.state == 'asleep') else 1)
-        cr.move_to(self.W / 2 - e.x_advance / 2, y0 + ph / 2 + e.height / 2 - 1); cr.show_text(txt)
-
+        cr.move_to(self.W / 2 - P['tw'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); cr.show_text(P['txt'])
 
 class App:
     def __init__(self, a):
         self.scale, self.quiet = a.scale, a.quiet
         self.mode, self.hidden, self.music, self.music_on = 'perch', False, False, True
         self.pets, self.agents = [], {}               # agents: id -> Chibi
+        self.dismissed = {}                           # agent id -> when; back when it asks or finishes a turn after that
         self.unused = list(range(1, 12)); random.shuffle(self.unused)
         self.unknown = set()
         self.pointer = Gdk.Display.get_default().get_default_seat().get_pointer()
@@ -291,7 +314,11 @@ class App:
 
     def got_agents(self, res):
         ids, new = set(), []
+        now = time.time()
         for a in res:
+            if a.id in self.dismissed:
+                if a.state in ('ask', 'done') and now - a.age > self.dismissed[a.id]: del self.dismissed[a.id]
+                else: continue
             ids.add(a.id)
             c = self.agents.get(a.id)
             if c is None:
@@ -375,6 +402,13 @@ class App:
 
     def everyone(self): return list(self.agents.values()) + self.pets
 
+    def dismiss(self, c):
+        if c.agent:
+            self.dismissed[c.agent.id] = time.time()
+            for s in self.agents.values():             # its subagents go with it
+                if s.agent.parent == c.agent.id: self.dismissed[s.agent.id] = time.time(); s.leave()
+        c.leave()
+
     # -- loading up, modes, commands -----------------------------------------------------------------------
     def add_pet(self, who=None):
         if who is None:
@@ -395,6 +429,7 @@ class App:
         return False
 
     def set_mode(self, m):
+        if m == 'toggle': m = 'show' if self.hidden else 'hide'
         if m == 'hide':
             self.hidden = True
             for c in self.everyone(): c.win.hide()
@@ -414,7 +449,7 @@ class App:
         for c in cmds:
             if c == 'pet': self.add_pet()
             elif c == 'opus': self.add_pet('opus%d' % random.randrange(8))
-            elif c in ('play', 'perch', 'hide', 'show'): self.set_mode(c)
+            elif c in ('play', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
 
     # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
     def tray(self):
@@ -447,6 +482,7 @@ class App:
         m.show_all()
         self.icon.connect('popup-menu', lambda i, b, t: m.popup(None, None, Gtk.StatusIcon.position_menu, i, b, t))
         self.icon.connect('activate', lambda *_: self.set_mode('play' if self.mode == 'perch' else 'perch'))
+        self.icon.connect('button-press-event', lambda i, ev: ev.button == 2 and (self.set_mode('toggle') or True))
         self.sync_menu()
 
     def sync_menu(self):
@@ -467,13 +503,13 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'perch', 'hide', 'show'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'perch', 'hide', 'show', 'toggle'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'perch', 'hide', 'show') if getattr(a, m)]
+    modes = [m for m in ('play', 'perch', 'hide', 'show', 'toggle') if getattr(a, m)]
     pid = running_pid()
     if a.quit:
         if pid: os.kill(pid, signal.SIGTERM)
