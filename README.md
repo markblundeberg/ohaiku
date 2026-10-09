@@ -84,8 +84,8 @@ it in Recess, close it and they jump up with a "!". It never takes focus. In Rec
 film on by themselves (at most every four minutes).
 
 **Nothing! Studying!** From any tier: shake the mouse hard left and right (or `--studying`, or the menu). Everyone spins
-into the tray icon, Opus gasps, the laptop slams, "Nothing! Studying!" (Mark's Suno take from *Load Up Haiku*), and
-three seconds later one Haiku peeks up by the tray and dings. They stay hidden until you click the tray icon.
+into the tray icon, silently (it's for hiding them, so no sound), and three seconds later one Haiku peeks up by the
+tray. They stay hidden until you click the tray icon.
 
 ## Pets
 

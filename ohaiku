@@ -17,7 +17,7 @@
                       Click one to build (Q.E.D. bricks), middle-click to float (dandelion), right-click to block.
                       If you don't play, a director does.  --ohno nukes them ("Oh no!")
   ohaiku --snow       petal snow (xsnow, bloomcore edition): petals pile up on your title bars; on during Bloomcore
-  ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray (also: shake the mouse)
+  ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray, silently (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
   ohaiku --quit       Haikus, go home;  --restart  go home and come back (agents only)
@@ -1215,9 +1215,6 @@ class App:
         for c in self.everyone():
             c.arc, c.falling, c.goal = None, False, None
             c.vac_from = (c.x, c.y); c.vac_delay = random.uniform(0, .12)
-        if not self.quiet:
-            try: subprocess.Popen(['paplay', os.path.join(HERE, 'studying.wav')], stderr=subprocess.DEVNULL)
-            except OSError: pass
 
     def study_tick(self, dt):
         t0 = self.studying; t = self.studying = t0 + dt
@@ -1250,11 +1247,6 @@ class App:
         elif self.peeker is not None:
             P = self.peeker; P.t += dt; u = t - 3.0
             P.duck = 1 - .62 * min(1, u / .25) if u < 1.6 else .38 + .62 * min(1, (u - 1.6) / .25)
-            if u > .2 and not self.dinged:
-                self.dinged = True
-                if not self.quiet:
-                    try: subprocess.Popen(['paplay', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
-                    except OSError: pass
             P.tick_draw()
             if u > 1.9:
                 P.win.destroy(); self.peeker = None; self.studying = None
