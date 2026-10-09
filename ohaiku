@@ -13,6 +13,7 @@
                       and a flower opens wherever one lands
   ohaiku --movie      movie night: they open a window, put on one of our films (muted), and watch it from a row
                       of cinema seats, headphones on. In Recess and Bloomcore they sometimes do this by themselves
+  ohaiku --snow       petal snow (xsnow, bloomcore edition): petals pile up on your title bars; on during Bloomcore
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
@@ -322,6 +323,94 @@ class Plane:
         return True
 
 
+PETALS = [(.97, .72, .78), (.99, .83, .35), (1, .98, .95), (.73, .64, .9), (.95, .55, .35), (.98, .6, .65), (.85, .45, .55)]
+
+
+class Snow:
+    """xsnow, bloomcore edition: petals drift down the screen and pile up on window tops and the bottom edge"""
+
+    def __init__(self, app):
+        self.app = app
+        self.falling, self.piles, self.tops, self.t = [], {}, {}, 0.0   # piles: surface id (None = floor) -> [[dx, y, rot, col]]
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        scr = Gdk.Screen.get_default(); self.W, self.H = scr.get_width(), scr.get_height()
+        w.resize(self.W, self.H); w.move(0, 0)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        if not app.hidden and not app.locked: w.show_all()
+
+    def petal(self, x, y, vx=0.0, vy=None):
+        return [x, y, vx, vy if vy is not None else random.uniform(35, 80), random.uniform(0, 6.3), random.uniform(-3, 3),
+                random.choice(PETALS), random.uniform(5, 9)]
+
+    def tick(self, dt, surfaces, fl, chibis):
+        self.t += dt
+        if len(self.falling) < 140 and random.random() < 8 * dt * 4:
+            self.falling.append(self.petal(random.uniform(0, self.W), -10))
+        S = {sf.id: sf for sf in surfaces}
+        # piles on windows that moved, closed or got covered slide off
+        for sid in list(self.piles):
+            if sid is None: continue
+            sf = S.get(sid); x0y = self.tops.get(sid)
+            if sf is None or x0y is None or abs(sf.x0 - x0y[0]) > 2 or abs(sf.y - x0y[1]) > 2:
+                vx = (sf.x0 - x0y[0]) * 8 if (sf and x0y) else 0          # moved, closed or covered: the drift slides off
+                for (dx, yy, rot, col) in self.piles.pop(sid):
+                    if x0y is None: continue
+                    self.falling.append([x0y[0] + dx, x0y[1] + yy, vx + random.uniform(-70, 70), random.uniform(-90, 10),
+                                         rot, random.uniform(-6, 6), col, 7])
+        for sf in surfaces: self.tops[sf.id] = (sf.x0, sf.y)
+        # haikus running through a drift kick it up
+        for c in chibis:
+            if not c.state.startswith('run'): continue
+            key = c.on if c.on is not None and c.on in S else None
+            pile = self.piles.get(key); base = S[key].x0 if key in S else 0
+            if not pile: continue
+            keep = []
+            for q in pile:
+                if abs(base + q[0] - c.x) < 18 and random.random() < .3:
+                    self.falling.append([base + q[0], c.y + q[1] - 4, random.uniform(-90, 90), random.uniform(-220, -120), q[2], 6, q[3], 7])
+                else: keep.append(q)
+            self.piles[key] = keep
+        nxt = []
+        for p in self.falling:
+            x0, y0 = p[0], p[1]
+            if p[3] < 35: p[3] = min(p[3] + 260 * dt, random.uniform(40, 110))
+            p[0] += (p[2] + 22 * math.sin(self.t * .9 + p[4])) * dt; p[1] += p[3] * dt; p[4] += p[5] * dt
+            p[2] *= (1 - .8 * dt)
+            landed = False
+            for sf in surfaces:
+                if y0 <= sf.y <= p[1] and sf.stands(p[0], 0):
+                    pile = self.piles.setdefault(sf.id, [])
+                    h = sum(1 for q in pile if abs(q[0] - (p[0] - sf.x0)) < 5)
+                    pile.append([p[0] - sf.x0, -1.6 * h - 1, p[4], p[6]]); landed = True
+                    if len(pile) > 260: pile.pop(0)
+                    break
+            if not landed and p[1] >= fl + 2:
+                pile = self.piles.setdefault(None, []); h = sum(1 for q in pile if abs(q[0] - p[0]) < 5)
+                pile.append([p[0], -1.6 * min(h, 8) - 1, p[4], p[6]]); landed = True
+                if len(pile) > 500: pile.pop(0)
+            if not landed and -40 < p[0] < self.W + 40: nxt.append(p)
+        self.falling = nxt
+        self.fl = fl
+        self.win.queue_draw()
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        def one(x, y, rot, col, r=7, flat=None):
+            cr.save(); cr.translate(x, y); cr.rotate(rot); cr.scale(1, flat if flat is not None else .35 + .65 * abs(math.cos(rot * 1.7)))
+            cr.arc(0, 0, r * .55, 0, 6.3); cr.restore()
+            cr.set_source_rgba(*col, .92); cr.fill()
+        for p in self.falling: one(p[0], p[1], p[4], p[6], p[7])
+        for sid, pile in self.piles.items():
+            base = (self.tops.get(sid) or (0, getattr(self, 'fl', self.H)))
+            bx, by = (0, getattr(self, 'fl', self.H) + 2) if sid is None else base
+            for (dx, yy, rot, col) in pile: one(bx + dx, by + yy, rot, col, 7, .4)
+        return True
+
+
 class Theater:
     """Movie night: the pets' own window, playing our films on mute (after MST3K, they sit in a row in front of it)"""
 
@@ -485,6 +574,7 @@ class App:
         self.flowers, self.party = [], []                                          # bloomcore
         self.theater, self.audience, self.last_movie = None, [], time.time()       # movie night
         self.planes, self.seen_sends = [], None                                    # paper airplanes
+        self.snow = None                                                           # petal snow
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -519,7 +609,7 @@ class App:
         except Exception as e:
             print('ohaiku: no recess (python-xlib?):', e, file=sys.stderr); self.world_ok = False; return
         while True:
-            if self.mode in ('recess', 'bloomcore') and not self.hidden:
+            if (self.mode in ('recess', 'bloomcore') or self.snow) and not self.hidden:
                 try: GLib.idle_add(self.set_surfaces, W.poll())
                 except Exception as e: print('ohaiku: world:', e, file=sys.stderr)
                 time.sleep(.12)
@@ -539,6 +629,7 @@ class App:
 
     def set_locked(self, v):
         self.locked = v
+        if self.snow: (self.snow.win.hide() if v else (not self.hidden and self.snow.win.show_all()))
         for c in self.everyone():
             if v: c.win.hide()
             elif not self.hidden: c.win.show_all()
@@ -645,6 +736,8 @@ class App:
         self.balloons = [b for b in self.balloons if b.tick(dt)]
         self.flowers = [f for f in self.flowers if f.tick(dt)]
         self.planes = [p for p in self.planes if p.tick(dt)]
+        if self.snow and not self.hidden and self.tk % 2 == 0:
+            self.snow.tick(2 * dt, self.surfaces, self.floor(), self.order())
         if self.theater and not self.hidden: self.audience_tick(dt)
         if self.mode in ('recess', 'bloomcore') and not self.theater and time.time() - self.last_movie > 240 and random.random() < dt / 90:
             self.movie()                                  # it's their playtime; sometimes they put a film on
@@ -677,7 +770,7 @@ class App:
     def keep_on_top(self):
         self.tk += 1
         if self.tk % (HZ * 2) == 0 and not self.hidden:
-            for c in self.everyone() + self.balloons:
+            for c in ([self.snow] if self.snow else []) + self.everyone() + self.balloons:
                 gw = c.win.get_window()
                 if gw: gw.raise_()
 
@@ -711,6 +804,13 @@ class App:
             c.arc, c.seated = None, False; c.set('alert'); self.pets.append(c)
         self.audience = []
         self.layout()
+
+    def toggle_snow(self, on=None):
+        on = (self.snow is None) if on is None else on
+        if on and not self.snow: self.snow = Snow(self)
+        elif not on and self.snow: self.snow.win.destroy(); self.snow = None
+        if not on and self.mode not in ('recess', 'bloomcore'): self.surfaces = []
+        return False
 
     def mail(self, res):
         """new SendMessage calls become paper airplanes (the first scan only remembers what was already sent)"""
@@ -943,6 +1043,7 @@ class App:
                 for f in self.flowers: f.win.destroy()
                 for c in self.audience: c.win.destroy()
                 if self.theater: self.theater.win.destroy(); self.theater = None
+                self.toggle_snow(False)
                 self.pets, self.party, self.flowers, self.audience = [], [], [], []
                 fl = self.floor()
                 for c in self.agents.values():
@@ -1004,6 +1105,7 @@ class App:
         item('Tag (one surfs your pointer)', lambda: self.set_mode('tag'))
         item('Bloomcore', lambda: self.set_mode('bloomcore'))
         item('Movie Night', self.movie)
+        item('Petal Snow', self.toggle_snow)
         item('Nothing! Studying!', self.study)
         item('Load Up Haiku', self.add_pet)
         m.append(Gtk.SeparatorMenuItem())
@@ -1046,15 +1148,17 @@ class App:
             self.hidden = True
             for c in self.everyone(): c.win.hide()
             if self.theater: self.theater.win.hide()
+            if self.snow: self.snow.win.hide()
         elif m == 'show':
             self.hidden = False
             for c in self.everyone(): c.win.show_all()
             if self.theater: self.theater.show()
+            if self.snow: self.snow.win.show_all()
         else:
             if m == 'play': m = 'follow'
             if m in ('recess', 'bloomcore') and not self.world_ok: m = 'perch'
             for c in self.everyone(): c.next_hop, c.settled, c.goal = None, False, None
-            if self.mode in ('recess', 'bloomcore') and m not in ('recess', 'bloomcore'): self.surfaces = []
+            if self.mode in ('recess', 'bloomcore') and m not in ('recess', 'bloomcore') and not self.snow: self.surfaces = []
             if self.mode == 'tag' and m != 'tag':
                 if self.surfer: self.surfer.set('idle')
                 self.surfer, self.it = None, 'you'
@@ -1063,7 +1167,11 @@ class App:
             if self.mode == 'bloomcore' and m != 'bloomcore':
                 for c in self.party: c.leave()
                 self.party = []
-            if m == 'bloomcore' and self.mode != 'bloomcore': GLib.timeout_add(800, lambda: (self.erupt(), False)[1])
+            if m == 'bloomcore' and self.mode != 'bloomcore':
+                GLib.timeout_add(800, lambda: (self.erupt(), False)[1])
+                if not self.snow: self.toggle_snow(True); self.snow_by_party = True
+            if self.mode == 'bloomcore' and m != 'bloomcore' and getattr(self, 'snow_by_party', False):
+                self.snow_by_party = False; self.toggle_snow(False)
             self.mode = m
             if self.hidden: self.set_mode('show')
         self.sync_menu()
@@ -1079,6 +1187,7 @@ class App:
             elif c in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
             elif c == 'studying': self.study()
             elif c == 'movie': self.movie()
+            elif c == 'snow': self.toggle_snow()
 
     # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
     def tray(self):
@@ -1103,6 +1212,7 @@ class App:
             r.connect('toggled', lambda w, k=key: (not self.menu_lock and w.get_active()) and self.set_mode(k))
             m.append(r); self.radios[key] = r
         item('Movie Night', self.movie)
+        item('Petal Snow', self.toggle_snow)
         item('Nothing! Studying!  (or shake the mouse)', self.study)
         m.append(Gtk.SeparatorMenuItem())
         ck = Gtk.CheckMenuItem(label='Dance Only When Music Plays'); ck.set_active(True)
@@ -1136,14 +1246,14 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie') if getattr(a, m)]
+    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow') if getattr(a, m)]
     pid = running_pid()
     if a.quit or a.restart:
         if pid:
@@ -1172,7 +1282,7 @@ def main():
     import cairo
     sys.path.insert(0, HERE)
     app = App(a)
-    for m in modes: app.study() if m == 'studying' else app.movie() if m == 'movie' else app.set_mode(m)
+    for m in modes: app.study() if m == 'studying' else app.movie() if m == 'movie' else app.toggle_snow() if m == 'snow' else app.set_mode(m)
     Gtk.main()
 
 
