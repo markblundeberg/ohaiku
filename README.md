@@ -81,6 +81,10 @@ nuke. The agents stay on the edge meanwhile.
 on your title bars and the bottom edge; move or close a window and its drift slides off; Haikus running through a drift
 kick it up. (About 10% of a CPU core while it's on.)
 
+**Autumn leaves**: `--leaves` or the menu. The same, in fall: maple, ginkgo and aspen leaves in reds, golds and rust
+rock side to side as they fall and tumble edge-on in the wind. There's a light prevailing breeze, and every few seconds a
+gust: leaves stream in from upwind, and a strong one lifts the drifts back off the title bars.
+
 **Paper airplanes**: when one session sends another a message (SendMessage), a paper plane flies from its chibi to the
 recipient's, who looks up with a "!". Recipients are found by session name, by subagent id, or by the messaging socket's
 pid (via `~/.claude/sessions/<pid>.json`); planes to anyone not on screen fly off the top.
