@@ -31,7 +31,7 @@
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray, silently (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
-  ohaiku --quit       Haikus, go home;  --restart  go home and come back (agents only)
+  ohaiku --quit       Haikus, go home;  --restart  go home and come back (agents only);  --status  what they're up to
 
 Every Claude Code session on this machine that was active in the last two hours gets a chibi of its own model, with
 its name on a little plate, standing on the bottom edge of the screen and acting out what it's doing: reading, searching
@@ -1018,7 +1018,10 @@ class Placard:
     def tick(self, dt, x, y):
         self.blink = max(0.0, self.blink - dt)
         self.win.move(int(x - self.W), int(y - self.H))
-        k = round(self.blink, 1)
+        why = self.app.gal_why
+        self.paused = not why.startswith(('watching', 'looking', 'settling'))
+        if self.app.tk % 15 == 0: self.win.set_tooltip_text('Peanut Gallery: %s. Click to stop.' % why)
+        k = (round(self.blink, 1), self.paused)
         if k != self.shown: self.shown = k; self.win.queue_draw()
 
     def draw(self, w, cr):
@@ -1028,7 +1031,9 @@ class Placard:
         cr.arc(W - r, H - r, r, 0, .5 * math.pi); cr.arc(1 + r, H - r, r, .5 * math.pi, math.pi); cr.close_path()
         cr.set_source_rgba(.165, .08, .086, .94); cr.fill_preserve(); cr.set_source_rgba(.85, .47, .34, .9); cr.set_line_width(1.5); cr.stroke()
         a = .35 + .65 * min(1, self.blink / .6)
-        cr.set_source_rgba(.92, .2, .2, a); cr.arc(14, self.H / 2, 4.5, 0, 7); cr.fill()
+        if getattr(self, 'paused', False): cr.set_source_rgba(.6, .55, .5, .8)        # paused: a grey dot (hover says why)
+        else: cr.set_source_rgba(.92, .2, .2, a)
+        cr.arc(14, self.H / 2, 4.5, 0, 7); cr.fill()
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(10.5)
         cr.set_source_rgb(1, .93, .8); cr.move_to(25, self.H / 2 + 4); cr.show_text('PEANUT GALLERY')
         return True
@@ -1060,7 +1065,7 @@ class App:
         self.flyers, self.idle_s, self.saver_after = [], 0.0, a.saver * 60         # flying haikus
         self.kaiju, self.last_clippy = None, time.time()
         self.gallery_on, self.gal_gen, self.gal_cast, self.gal_hist, self.placard = False, 0, [], [], None   # peanut gallery
-        self.speeches, self.said, self.gal_skip, self.gal_hide = [], {}, [], []
+        self.speeches, self.said, self.gal_skip, self.gal_hide, self.gal_why = [], {}, [], [], 'off'
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -1607,7 +1612,10 @@ class App:
         if on == self.gallery_on: return
         self.gallery_on = on; self.gal_gen += 1
         if on:
+            if self.mode != 'perch': self.set_mode('perch')            # the gallery is its own tier: everyone sits down
+            if self.hidden: self.set_mode('show')
             import gallery; self.gal_hist, self.gal_skip = [], gallery.skip_words()
+            self.gal_why = 'settling in'
             self.placard = Placard(self)
             threading.Thread(target=self.gallery_loop, args=(self.gal_gen,), daemon=True).start()
         else:
@@ -1638,20 +1646,27 @@ class App:
         live = lambda: self.gallery_on and self.gal_gen == gen
         while live():
             time.sleep(1)
-            if self.hidden or self.locked or self.studying is not None or not self.gal_cast or self.mode != 'perch' and not self.audience: continue
+            why = ('hidden' if self.hidden else 'screen locked' if self.locked else 'studying' if self.studying is not None
+                   else 'nobody free to watch' if not self.gal_cast else None)
+            if why: self.gal_why = why; continue
             if time.time() - last_sent < wait: continue
             try:
                 jpg, th = gallery.capture(W, H, gallery.private_rects(S.windows()) + list(self.gal_hide))
             except Exception as e:
-                print('ohaiku: gallery capture:', e, file=sys.stderr); last_sent, wait = time.time(), 60; continue
-            if gallery.changed(th, last_thumb) < 2.0 and time.time() - last_sent < 300: continue     # nothing new on screen
+                print('ohaiku: gallery capture:', e, file=sys.stderr); last_sent, wait = time.time(), 60
+                self.gal_why = 'screenshot failed: %s' % str(e)[:80]; continue
+            if gallery.changed(th, last_thumb) < 2.0 and time.time() - last_sent < 300:      # nothing new on screen
+                self.gal_why = 'watching (nothing new on screen)'; continue
             last_thumb, last_sent, wait = th, time.time(), GAL_EVERY
+            self.gal_why = 'looking...'
             GLib.idle_add(lambda: (self.placard and setattr(self.placard, 'blink', 1.0), False)[1])
             try:
                 res = gallery.look(jpg, list(self.gal_cast), hist)
             except Exception as e:
-                print('ohaiku: gallery:', e, file=sys.stderr); wait = 60; continue
+                print('ohaiku: gallery:', e, file=sys.stderr); wait = 60
+                self.gal_why = 'Haiku call failed: %s' % str(e)[:80]; continue
             if not live(): break
+            self.gal_why, self.gal_looks = 'watching (last look %s)' % time.strftime('%H:%M:%S'), getattr(self, 'gal_looks', 0) + 1
             hist.append('%s seen: %s' % (time.strftime('%H:%M'), res['seen']) + ''.join(' | %s: "%s"' % (r['who'], r['line']) for r in res['riffs']))
             try:
                 gallery.write('**%s** %s' % (time.strftime('%H:%M'), res['seen']) + ''.join('\n> **%s:** %s' % (r['who'], r['line']) for r in res['riffs'])
@@ -1992,6 +2007,7 @@ class App:
             if self.placard: self.placard.win.show_all()
         else:
             if m == 'play': m = 'follow'
+            if m != 'perch' and self.gallery_on: self.gallery(False)    # off to play: the show's over
             if m in ('recess', 'bloomcore', 'lemmings') and not self.world_ok: m = 'perch'
             for c in self.everyone(): c.next_hop, c.settled, c.goal = None, False, None
             if self.mode in ('recess', 'bloomcore', 'lemmings') and m not in ('recess', 'bloomcore', 'lemmings') and not self.snow: self.surfaces = []
@@ -2032,6 +2048,13 @@ class App:
             elif c == 'kaiju': self.stomp()
             elif c == 'clippy': self.clippy()
             elif c == 'gallery': self.gallery()
+            elif c == 'status':
+                st = dict(mode=self.mode, hidden=self.hidden, locked=self.locked, gallery=self.gal_why if self.gallery_on else 'off',
+                          looks=getattr(self, 'gal_looks', 0), cast=[n for n, _ in self.gal_cast] if self.gallery_on else [],
+                          agents={c.agent.name: c.agent.state + (':' + c.agent.tool if c.agent.tool else '') for c in self.agents.values()},
+                          pets=len(self.pets), snow=self.snow.kind if self.snow else None, theater=bool(self.theater))
+                try: open(_RUN + '.status', 'w').write(json.dumps(st, indent=1) + '\n')
+                except OSError: pass
             elif c == 'cascade':                          # (for testing: a pretend long finish)
                 cs = [x for x in self.agents.values() if not x.gone]
                 if cs: self.cascades.append(Cascade(self, random.choice(cs)))
@@ -2107,11 +2130,21 @@ def main():
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
+    p.add_argument('--status', action='store_true', help="what they're up to")
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
     modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery', 'leaves') if getattr(a, m)]
     pid = running_pid()
+    if a.status:
+        if not pid: print('ohaiku is not running'); return
+        try: os.unlink(_RUN + '.status')
+        except OSError: pass
+        open(CMDF, 'w').write('status'); os.kill(pid, signal.SIGUSR1)
+        for _ in range(30):
+            time.sleep(.1)
+            if os.path.exists(_RUN + '.status'): print(open(_RUN + '.status').read(), end=''); return
+        print('ohaiku (pid %d) did not answer' % pid); return
     if a.quit or a.restart:
         if pid:
             os.kill(pid, signal.SIGTERM)
