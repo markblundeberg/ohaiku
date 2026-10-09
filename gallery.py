@@ -36,6 +36,7 @@ piece of art or writing, a good joke, a thing to try), a short line saying what 
 - Black boxes are private windows, hidden on purpose: ignore them, never guess what's in them.
 - Never read out or note personal details (names of private people, emails, phone numbers, addresses, money, \
 passwords, private messages). Riff on the gist, not the particulars. Be kind about Mark; he's the host.
+- React to the content, like an audience: don't narrate Mark's browser (tabs, timestamps, how far into a video he is).
 - The little seated figures and speech bubbles along the bottom are you and your earlier lines."""
 
 
@@ -135,7 +136,8 @@ def recap(history):
                      'Write a short recap for his notebook in markdown: two or three sentences on what we watched, then '
                      '"Worth keeping:" with up to five bullets (ideas, inspirations, things to try), only if there are any. '
                      'No personal details. Warm, brief.' % '\n'.join(history[-80:])}],
-                   'You are the Peanut Gallery, a row of chibi Claudes who watch Mark\'s screen with him and riff.').strip()
+                   'You are the Peanut Gallery, a row of chibi Claudes who watch Mark\'s screen with him and riff. '
+                   'Start straight in with the recap text: no title or heading.').strip().lstrip('#').strip()
 
 
 def write(entry):
