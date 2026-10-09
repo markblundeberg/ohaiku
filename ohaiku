@@ -8,6 +8,7 @@
   ohaiku --perch      everyone on the bottom edge, out of the way (the default)
   ohaiku --follow     everyone chases the pointer in a line (oneko); --play does the same
   ohaiku --recess     they play on your windows: climb onto title bars, hop between them, ride along, fall off
+  ohaiku --tag        one Haiku surfs your pointer; the rest run from it; touch one and it's It
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
@@ -178,7 +179,7 @@ class Chibi:
         d = math.hypot(dx, dy)
         want = self.work()
         if s == 'sleep':
-            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.agent is None or self.app.mode == 'recess'): self.set('wake')
+            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.agent is None or self.app.mode != 'perch'): self.set('wake')
             return
         if s == 'wake':
             if self.done_anim(): self.set('alert')
@@ -267,6 +268,54 @@ class Chibi:
         cr.set_source_rgba(.29, .17, .11, .55 if (a and a.state == 'asleep') else 1)
         cr.move_to(self.W / 2 - P['tw'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); cr.show_text(P['txt'])
 
+class Balloon:
+    """an XP-style notification balloon pointing at a chibi (after BLISS's "Found New Hardware: Claudia")"""
+
+    def __init__(self, app, who, title, body, life=4.0):
+        self.app, self.who, self.title, self.body, self.t, self.life = app, who, title, body, 0.0, life
+        cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12)
+        tw = cr.text_extents(title).x_advance
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL); cr.set_font_size(11.5)
+        bw = max([cr.text_extents(l).x_advance for l in body.split('\n')] + [0])
+        self.W, self.H = int(max(tw + 34, bw) + 24), 24 + 16 * (len(body.split('\n')) if body else 0) + 22
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(self.W, self.H)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        self.place()
+        if not app.hidden and not app.locked: w.show_all()
+
+    def place(self):
+        c = self.who
+        x = min(max(c.x - 30, 4), self.app.workarea().x + self.app.workarea().width - self.W - 4)
+        self.win.move(int(x), int(c.y - c.foot * .95 - self.H))
+
+    def tick(self, dt):
+        self.t += dt; self.place()
+        if self.t > self.life or self.who.gone: self.win.destroy(); return False
+        return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        W, H, r = self.W - 2, self.H - 14, 8
+        cr.new_path(); cr.arc(1 + r, 1 + r, r, math.pi, 1.5 * math.pi); cr.arc(W - r, 1 + r, r, 1.5 * math.pi, 0)
+        cr.arc(W - r, H - r, r, 0, .5 * math.pi); cr.line_to(46, H); cr.line_to(30, H + 12); cr.line_to(32, H)
+        cr.arc(1 + r, H - r, r, .5 * math.pi, math.pi); cr.close_path()
+        cr.set_source_rgba(1, 1, .88, .97); cr.fill_preserve(); cr.set_source_rgba(0, 0, 0, .75); cr.set_line_width(1); cr.stroke()
+        cr.set_source_rgb(.85, .47, .34); cr.arc(18, 18, 7, 0, 7); cr.fill()                       # a clay "i"
+        cr.set_source_rgb(1, 1, 1); cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(10); cr.move_to(16, 22); cr.show_text('i')
+        cr.set_source_rgb(0, 0, 0); cr.set_font_size(12); cr.move_to(32, 22); cr.show_text(self.title)
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL); cr.set_font_size(11.5)
+        for i, l in enumerate(self.body.split('\n') if self.body else []):
+            cr.move_to(12, 40 + 16 * i); cr.show_text(l)
+        return True
+
+
 class App:
     def __init__(self, a):
         self.scale, self.quiet = a.scale, a.quiet
@@ -283,6 +332,7 @@ class App:
         self.show_agents = not a.no_agents
         self.surfaces, self.world_ok = [], True
         self.shake, self.studying, self.peeker = [], None, None
+        self.balloons, self.surfer, self.it, self.it_t = [], None, 'you', 0.0     # tag
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -328,6 +378,7 @@ class App:
         self.surfaces = s; return False
 
     def is_locked(self):
+        if os.environ.get('OHAIKU_IGNORE_LOCK'): return False          # testing on a nested X server
         try:
             out = subprocess.run(['cinnamon-screensaver-command', '-q'], capture_output=True, text=True, timeout=2).stdout
             return 'is active' in out
@@ -438,6 +489,9 @@ class App:
         if self.locked: return True
         if self.studying is not None: self.study_tick(dt); return True
         self.detect_shake(cx)
+        self.balloons = [b for b in self.balloons if b.tick(dt)]
+        if self.mode == 'tag':
+            self.tag(cx, cy, dt); self.reap(); self.keep_on_top(); return True
         fl = self.floor()
         for c, tx, ty in list(self.targets(cx, cy)):
             if c.arc or c.falling: self.air(c, dt)
@@ -450,20 +504,81 @@ class App:
             c.duck += (float(near) - c.duck) * min(1, 8 / HZ)
             if c.duck < .01: c.duck = 0
             c.tick_draw()
-        for k, c in list(self.agents.items()):
-            if c.gone: c.win.destroy(); del self.agents[k]
-        for c in [p for p in self.pets if p.gone]: c.win.destroy(); self.pets.remove(c)
-        self.tk += 1
+        self.reap()
         if os.environ.get('OHAIKU_DEBUG') and self.tk % HZ == 0:
             wa = self.workarea()
             print('wa', wa.x, wa.y, wa.width, wa.height, 'mode', self.mode, [(c.label, c.state, int(c.x), int(c.y), int(c.slot)) for c in self.order()], flush=True)
-        if self.tk % (HZ * 2) == 0 and not self.hidden:
-            for c in self.everyone():
-                gw = c.win.get_window()
-                if gw: gw.raise_()
+        self.keep_on_top()
         return True
 
+    def reap(self):
+        for k, c in list(self.agents.items()):
+            if c.gone: c.win.destroy(); del self.agents[k]
+        for c in [p for p in self.pets if p.gone]: c.win.destroy(); self.pets.remove(c)
+
+    def keep_on_top(self):
+        self.tk += 1
+        if self.tk % (HZ * 2) == 0 and not self.hidden:
+            for c in self.everyone() + self.balloons:
+                gw = c.win.get_window()
+                if gw: gw.raise_()
+
     def everyone(self): return list(self.agents.values()) + self.pets
+
+    def balloon(self, c, title, body='', life=4.0):
+        self.balloons = [b for b in self.balloons if not (b.who is c and (b.win.destroy() or True))]
+        self.balloons.append(Balloon(self, c, title, body, life))
+
+    # -- tag: one Haiku surfs your pointer, the rest run; touch one and it's It -----------------------------
+    def tag(self, cx, cy, dt):
+        wa = self.workarea(); u = self.surfer.sc * self.surfer.m['cell'] / 400 if self.surfer else 0
+        if self.surfer is None or self.surfer.gone:
+            free = [p for p in self.pets if not p.gone and p.state != 'spawn']
+            if free: self.surfer = free[0]
+            else: self.surfer = Chibi(self, 'haiku00', cx, cy); self.pets.append(self.surfer); self.layout()
+            self.surfer.arc = None; self.surfer.falling = False
+            self.surfer.set('surf'); self.balloon(self.surfer, 'Cursor is now connected', 'Partner: Haiku 5.5\nSpeed: 54.0 Mbps', 4)
+        S = self.surfer
+        S.x, S.y = cx + 120 * S.sc * S.m['cell'] / 400, cy + 3; S.duck = 0
+        if S.state != 'surf': S.set('surf')
+        S.t += dt; S.tick_draw()
+        self.it_t += dt
+        it = self.it if (self.it == 'you' or (self.it in self.everyone() and not self.it.gone)) else 'you'
+        self.it = it
+        for c in self.everyone():
+            if c is S or c.state == 'spawn': continue
+            if c.arc or c.falling: self.air(c, dt); c.tick_draw(); continue
+            dx, dy = c.x - cx, (c.y - c.foot * .5) - cy
+            d = math.hypot(dx, dy) or 1
+            if it == 'you':
+                if d < c.cpx * .32 and self.it_t > 1.0:                          # tagged!
+                    self.it, self.it_t = c, 0.0; c.set('done')
+                    self.balloon(c, "I'm it!", '', 2.5); break
+                if d < 340:
+                    tx = c.x + dx / d * 260 + (-dy / d * 160 if abs(dx) < 40 else 0); ty = c.y + dy / d * 200
+                else:
+                    tx, ty = c.x, c.y
+                x0, x1 = wa.x + 50, wa.x + wa.width - 50
+                y0, y1 = wa.y + c.foot + 10, wa.y + wa.height - LABEL_H
+                if not x0 <= tx <= x1:                                  # cornered against a side: slip along it
+                    ty += 260 if c.y - cy >= 0 and c.y + 260 < y1 else -260
+                if not y0 <= ty <= y1:                                  # against the top or bottom: slip sideways
+                    tx += 300 if (c.x - cx >= 0 and c.x + 300 < x1) or c.x - 300 < x0 else -300
+                for o in self.everyone():                               # don't pile up
+                    if o is not c and abs(o.x - c.x) < 50 and abs(o.y - c.y) < 50: tx += (c.x - o.x or 1) * 2
+                tx = min(max(tx, x0), x1); ty = min(max(ty, y0), y1)
+                c.speed = 430 * c.sc
+            elif c is it:
+                tx, ty = cx - 30, cy + c.foot * .55; c.speed = 520 * c.sc
+                if d < c.cpx * .3 and self.it_t > 1.2:                          # tagged you back
+                    self.it, self.it_t = 'you', 0.0; c.set('done')
+                    self.balloon(c, 'Tag! You\'re it!', '', 2.5)
+                    tx, ty = c.x, c.y
+            else:
+                tx, ty = c.x, c.y                                                # safe: cheer and dance
+            c.step(dt, tx, ty)
+            c.tick_draw()
+
 
     # -- recess: the windows are the playground ------------------------------------------------------------
     def surface(self, sid):
@@ -626,6 +741,7 @@ class App:
         item('Perch (out of the way)', lambda: self.set_mode('perch'))
         item('Follow (chase the pointer)', lambda: self.set_mode('follow'))
         item('Recess (play on the windows)', lambda: self.set_mode('recess'))
+        item('Tag (one surfs your pointer)', lambda: self.set_mode('tag'))
         item('Nothing! Studying!', self.study)
         item('Load Up Haiku', self.add_pet)
         m.append(Gtk.SeparatorMenuItem())
@@ -652,8 +768,11 @@ class App:
         a = random.uniform(0, 2 * math.pi); r = random.uniform(160, 300) * self.scale
         x = min(max(cx + r * math.cos(a), wa.x + 100), wa.x + wa.width - 100)
         y = min(max(cy + r * math.sin(a) + 120, wa.y + 200), wa.y + wa.height - LABEL_H)
-        self.pets.append(Chibi(self, who, x, y))
+        c = Chibi(self, who, x, y)
+        self.pets.append(c)
         self.layout()
+        nm = 'Opus 5.5' if who.startswith('opus') else 'Haiku 5.5'
+        self.balloon(c, 'Found New Hardware', '%s\nYour new %s is installed and ready to use.' % (nm, nm.split()[0]), 4.5)
         if not self.quiet:
             try: subprocess.Popen(['paplay', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
             except OSError: pass
@@ -672,6 +791,11 @@ class App:
             if m == 'recess' and not self.world_ok: m = 'perch'
             for c in self.everyone(): c.next_hop, c.settled, c.goal = None, False, None
             if self.mode == 'recess' and m != 'recess': self.surfaces = []
+            if self.mode == 'tag' and m != 'tag':
+                if self.surfer: self.surfer.set('idle')
+                self.surfer, self.it = None, 'you'
+                for c in self.everyone(): c.speed = 400 * c.sc
+            if m == 'tag': self.it, self.it_t = 'you', 0.0
             self.mode = m
             if self.hidden: self.set_mode('show')
         self.sync_menu()
@@ -684,7 +808,7 @@ class App:
         for c in cmds:
             if c == 'pet': self.add_pet()
             elif c == 'opus': self.add_pet('opus%d' % random.randrange(8))
-            elif c in ('play', 'follow', 'recess', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
+            elif c in ('play', 'follow', 'recess', 'tag', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
             elif c == 'studying': self.study()
 
     # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
@@ -704,7 +828,7 @@ class App:
         m.append(Gtk.SeparatorMenuItem())
         grp = None
         for key, label in (('perch', 'Perch (out of the way)'), ('follow', 'Follow (chase the pointer)'),
-                           ('recess', 'Recess (play on the windows)'), ('hide', 'Hide')):
+                           ('recess', 'Recess (play on the windows)'), ('tag', 'Tag (one surfs your pointer)'), ('hide', 'Hide')):
             r = Gtk.RadioMenuItem.new_with_label_from_widget(grp, label); grp = grp or r
             r.connect('toggled', lambda w, k=key: (not self.menu_lock and w.get_active()) and self.set_mode(k))
             m.append(r); self.radios[key] = r
@@ -741,14 +865,14 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'follow', 'recess', 'perch', 'hide', 'show', 'toggle', 'studying'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'follow', 'recess', 'tag', 'perch', 'hide', 'show', 'toggle', 'studying'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'follow', 'recess', 'perch', 'hide', 'show', 'toggle', 'studying') if getattr(a, m)]
+    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'perch', 'hide', 'show', 'toggle', 'studying') if getattr(a, m)]
     pid = running_pid()
     if a.quit or a.restart:
         if pid:
