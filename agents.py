@@ -15,6 +15,7 @@ Agent.state is one of
 import glob, hashlib, json, os, time
 
 ROOT = os.path.expanduser('~/.claude/projects')
+LIVE = os.path.expanduser('~/.claude/sessions')       # <pid>.json for each running Claude Code process
 DONE_S, SLEEP_S = 25, 20 * 60
 SKIP = {'last-prompt', 'custom-title', 'agent-name', 'mode', 'permission-mode', 'atis-latch', 'bridge-session',
         'attachment', 'file-history-snapshot', 'queue-operation', 'summary', 'progress'}
@@ -56,6 +57,7 @@ def _parse(path):
     if c and c[0] == st.st_mtime and c[1] == st.st_size: return c[2]
     ents = _tail_entries(path)
     state, tool, last_tool, model, title, aname, cwd = None, None, None, None, None, None, None
+    sends = []                                        # recent SendMessage calls: (tool_use id, to, timestamp)
     for e in ents:                                    # newest first
         t = e.get('type')
         if t == 'custom-title' and title is None: title = e.get('customTitle')
@@ -63,6 +65,10 @@ def _parse(path):
         if cwd is None and e.get('cwd'): cwd = e['cwd']
         m = e.get('message') or {}
         if model is None and t == 'assistant' and m.get('model') and not m['model'].startswith('<'): model = m['model']
+        if t == 'assistant':
+            for b in (m.get('content') or []):
+                if isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('name') == 'SendMessage':
+                    sends.append((b.get('id'), str((b.get('input') or {}).get('to', '')), e.get('timestamp', '')))
         if last_tool is None and t == 'assistant':
             lu = [b for b in (m.get('content') or []) if isinstance(b, dict) and b.get('type') == 'tool_use']
             if lu: last_tool = lu[-1].get('name')
@@ -80,13 +86,30 @@ def _parse(path):
             else: state = 'think'
         elif t == 'system':
             if e.get('subtype') == 'turn_duration': state = 'free'
-    parsed = dict(state=state or 'free', tool=tool if state in ('tool', 'ask') else None, last_tool=last_tool, model=model or '', title=title,
+    parsed = dict(state=state or 'free', tool=tool if state in ('tool', 'ask') else None, last_tool=last_tool, sends=sends, model=model or '', title=title,
                   aname=aname, cwd=cwd)
     _cache[path] = (st.st_mtime, st.st_size, parsed)
     return parsed
 
 
 _names = {}
+_born = {}
+
+
+def _first_time(path):
+    """when the transcript began (its first timestamp); a stable order for the line (ctime changes on every write)"""
+    if path in _born: return _born[path]
+    t = None
+    try:
+        with open(path) as f:
+            for ln, _ in zip(f, range(50)):
+                ts = json.loads(ln).get('timestamp') if '"timestamp"' in ln else None
+                if ts:
+                    t = time.mktime(time.strptime(ts[:19], '%Y-%m-%dT%H:%M:%S')); break
+    except (OSError, ValueError):
+        pass
+    _born[path] = t or os.path.getmtime(path)
+    return _born[path]
 
 
 def _whole_file_names(path):
@@ -112,14 +135,29 @@ def _look(model, sid, kind):
     return 'haiku%02d' % (h % 12)
 
 
+def live_sessions():
+    """sessionId -> the running process's record (name, status 'busy'/'idle'/..., pid, socket), for live pids only"""
+    out = {}
+    for f in glob.glob(os.path.join(LIVE, '*.json')):
+        try:
+            d = json.load(open(f)); pid = int(d['pid'])
+            os.kill(pid, 0)
+        except (OSError, ValueError, KeyError):
+            continue
+        out[d.get('sessionId')] = d
+    return out
+
+
 def scan(within=2 * 3600, now=None):
     now = now or time.time()
     out = []
+    live = live_sessions()
     for path in glob.glob(os.path.join(ROOT, '*', '*.jsonl')):
         try: mt = os.path.getmtime(path)
         except OSError: continue
-        if now - mt > within: continue
         sid = os.path.basename(path)[:-6]
+        L = live.get(sid)
+        if now - mt > within and not L: continue
         try: p = _parse(path)
         except OSError: continue
         title, aname = p['title'], p['aname']
@@ -128,15 +166,22 @@ def scan(within=2 * 3600, now=None):
         if not title and os.path.exists(tf):
             try: title = json.load(open(tf)).get('customTitle')
             except (OSError, ValueError): pass
+        if L and L.get('name'): title = L['name']
         name = title or aname or (os.path.basename(p['cwd']) if p['cwd'] else sid[:8])
         age = now - mt
         state = p['state']
         tool = p['tool']
-        if state in ('think', 'tool') and age > 15 * 60: state = 'free'          # stalled, or closed mid-turn
+        if L:                                         # the process says what it's doing right now
+            st = L.get('status')
+            if st == 'idle' and state in ('think', 'tool'): state = 'free'
+            elif st == 'busy' and state == 'free': state = 'think'
+            elif st not in (None, 'idle', 'busy'): state, tool = 'ask', st           # e.g. waiting for permission
+        elif state in ('think', 'tool') and age > 15 * 60: state = 'free'          # stalled, or closed mid-turn
         elif state == 'think' and age > 12 and p['last_tool']: state, tool = 'tool', p['last_tool']   # (see above)
         if state == 'free': state = 'done' if age < DONE_S else ('asleep' if age > SLEEP_S else 'free')
-        out.append(Agent(kind='session', id=sid, parent=None, name=name, names=[n for n in (title, aname) if n], state=state, tool=tool, model=p['model'],
-                         age=age, look=_look(p['model'], sid, 'session'), born=os.path.getctime(path)))
+        out.append(Agent(kind='session', id=sid, parent=None, name=name, names=[n for n in (title, aname) if n], state=state,
+                         sends=p['sends'], pid=int(L['pid']) if L else None, sock=(L or {}).get('messagingSocketPath'), live=bool(L), tool=tool, model=p['model'],
+                         age=age, look=_look(p['model'], sid, 'session'), born=_first_time(path)))
         # subagents: shown while they run, and briefly once they finish
         for sp in glob.glob(os.path.join(os.path.dirname(path), sid, 'subagents', 'agent-*.jsonl')):
             try: smt = os.path.getmtime(sp)
@@ -155,8 +200,8 @@ def scan(within=2 * 3600, now=None):
             desc = ''
             try: desc = json.load(open(sp[:-6] + '.meta.json')).get('description', '')
             except (OSError, ValueError): pass
-            out.append(Agent(kind='sub', id=aid, parent=sid, name=desc or 'helper', names=[n for n in (title, aname) if n], state=sst, tool=stool,
-                             model=q['model'], age=sage, look=_look(q['model'], aid, 'sub'), born=os.path.getctime(sp)))
+            out.append(Agent(kind='sub', id=aid, parent=sid, name=desc or 'helper', names=[n for n in (title, aname) if n], state=sst, sends=q['sends'], pid=None, sock=None, live=False, tool=stool,
+                             model=q['model'], age=sage, look=_look(q['model'], aid, 'sub'), born=_first_time(sp)))
     return out
 
 

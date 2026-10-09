@@ -272,6 +272,56 @@ class Chibi:
         cr.set_source_rgba(.29, .17, .11, .55 if (a and a.state == 'asleep') else 1)
         cr.move_to(self.W / 2 - P['tw'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); cr.show_text(P['txt'])
 
+class Plane:
+    """a paper airplane: one session's SendMessage, flying from its chibi to the recipient's (or off the top)"""
+
+    def __init__(self, app, src, dst):
+        self.app, self.dst, self.t = app, dst, 0.0
+        self.p0 = (src.x + 10, src.y - src.foot * .8)
+        self.p2 = (dst.x, dst.y - dst.foot * .8) if dst else (src.x + random.uniform(-300, 300), -60)
+        d = math.hypot(self.p2[0] - self.p0[0], self.p2[1] - self.p0[1])
+        self.p1 = ((self.p0[0] + self.p2[0]) / 2, min(self.p0[1], self.p2[1]) - 120 - .25 * d)
+        self.T = 1.2 + d / 1300
+        self.ang = 0.0
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(64, 64)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        self.place()
+        if not app.hidden and not app.locked: w.show_all()
+
+    def pos(self, k):
+        (x0, y0), (x1, y1), (x2, y2) = self.p0, self.p1, self.p2
+        if self.dst: x2, y2 = self.dst.x, self.dst.y - self.dst.foot * .8          # follow a moving target
+        a, b, c = (1 - k) ** 2, 2 * k * (1 - k), k * k
+        return a * x0 + b * x1 + c * x2, a * y0 + b * y1 + c * y2
+
+    def place(self):
+        k = min(1, self.t / self.T); x, y = self.pos(k); x2, y2 = self.pos(min(1, k + .02))
+        self.ang = math.atan2(y2 - y, x2 - x) + .25 * math.sin(self.t * 9)
+        self.win.move(int(x - 32), int(y - 32))
+
+    def tick(self, dt):
+        self.t += dt; self.place(); self.win.queue_draw()
+        if self.t >= self.T:
+            if self.dst and not self.dst.gone and self.dst.state in ('idle', 'cat', 'dance', 'think'):
+                self.dst.set('alert')                                    # "!": got mail
+            self.win.destroy(); return False
+        return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        cr.translate(32, 32); cr.rotate(self.ang)
+        cr.move_to(24, 0); cr.line_to(-18, -14); cr.line_to(-10, 0); cr.line_to(-18, 13); cr.close_path()
+        cr.set_source_rgb(1, .99, .96); cr.fill_preserve(); cr.set_source_rgba(.29, .17, .11, .9); cr.set_line_width(1.6); cr.stroke()
+        cr.move_to(24, 0); cr.line_to(-10, 0); cr.line_to(-14, 6); cr.close_path()
+        cr.set_source_rgba(.85, .8, .72, 1); cr.fill_preserve(); cr.set_source_rgba(.29, .17, .11, .7); cr.stroke()
+        return True
+
+
 class Theater:
     """Movie night: the pets' own window, playing our films on mute (after MST3K, they sit in a row in front of it)"""
 
@@ -434,6 +484,7 @@ class App:
         self.balloons, self.surfer, self.it, self.it_t = [], None, 'you', 0.0     # tag
         self.flowers, self.party = [], []                                          # bloomcore
         self.theater, self.audience, self.last_movie = None, [], time.time()       # movie night
+        self.planes, self.seen_sends = [], None                                    # paper airplanes
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -536,6 +587,7 @@ class App:
         for k, c in list(self.agents.items()):
             if k not in ids: c.leave()
         self.layout()
+        self.mail(res)
         for c in new: c.x = c.slot; c.place()            # bloom where they'll stand
         return False
 
@@ -592,6 +644,7 @@ class App:
         self.detect_shake(cx)
         self.balloons = [b for b in self.balloons if b.tick(dt)]
         self.flowers = [f for f in self.flowers if f.tick(dt)]
+        self.planes = [p for p in self.planes if p.tick(dt)]
         if self.theater and not self.hidden: self.audience_tick(dt)
         if self.mode in ('recess', 'bloomcore') and not self.theater and time.time() - self.last_movie > 240 and random.random() < dt / 90:
             self.movie()                                  # it's their playtime; sometimes they put a film on
@@ -658,6 +711,28 @@ class App:
             c.arc, c.seated = None, False; c.set('alert'); self.pets.append(c)
         self.audience = []
         self.layout()
+
+    def mail(self, res):
+        """new SendMessage calls become paper airplanes (the first scan only remembers what was already sent)"""
+        first = self.seen_sends is None
+        if first: self.seen_sends = set()
+        for a in res:
+            for sid, to, ts in getattr(a, 'sends', []):
+                if sid in self.seen_sends: continue
+                self.seen_sends.add(sid)
+                src = self.agents.get(a.id)
+                if first or not src or self.hidden: continue
+                self.planes.append(Plane(self, src, self.addressee(to)))
+
+    def addressee(self, to):
+        cs = [c for c in self.agents.values() if c.agent and not c.gone]
+        if to.startswith('uds:'):
+            try: pid = int(os.path.basename(to).split('.')[0])
+            except ValueError: return None
+            return next((c for c in cs if c.agent.pid == pid), None)
+        if len(to) == 17 and to[0] == 'a': return next((c for c in cs if c.agent.id == 'agent-' + to), None)
+        return next((c for c in cs if to in (c.agent.names or []) or to == c.agent.name), None) or \
+            next((c for c in cs if to.lower() == c.agent.name.lower()), None)
 
     def audience_tick(self, dt):
         T = self.theater
