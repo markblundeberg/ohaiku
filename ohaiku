@@ -104,7 +104,7 @@ class Chibi:
         w.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
         w.connect('button-press-event', self.clicked)
         self.place()
-        if not app.hidden: w.show_all()
+        if not app.hidden and not app.locked: w.show_all()
 
     @property
     def foot(self): return self.m['foot'][1] * self.sc
@@ -271,6 +271,7 @@ class App:
     def __init__(self, a):
         self.scale, self.quiet = a.scale, a.quiet
         self.mode, self.hidden, self.music, self.music_on = 'perch', False, False, True
+        self.locked = False                           # screen locked: everyone hides and holds still
         self.pets, self.agents = [], {}               # agents: id -> Chibi
         self.dismissed = {}                           # agent id -> when; back when it asks or finishes a turn after that
         self.unused = list(range(1, 12)); random.shuffle(self.unused)
@@ -296,6 +297,9 @@ class App:
         import agents
         last_music = 0
         while True:
+            lk = self.is_locked()
+            if lk != self.locked: GLib.idle_add(self.set_locked, lk)
+            if lk: time.sleep(2); continue
             try:
                 res = agents.scan() if self.show_agents else []
                 GLib.idle_add(self.got_agents, res)
@@ -322,6 +326,20 @@ class App:
 
     def set_surfaces(self, s):
         self.surfaces = s; return False
+
+    def is_locked(self):
+        try:
+            out = subprocess.run(['cinnamon-screensaver-command', '-q'], capture_output=True, text=True, timeout=2).stdout
+            return 'is active' in out
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def set_locked(self, v):
+        self.locked = v
+        for c in self.everyone():
+            if v: c.win.hide()
+            elif not self.hidden: c.win.show_all()
+        return False
 
     def set_music(self, m):
         self.music = m and self.music_on; return False
@@ -417,6 +435,7 @@ class App:
     def tick(self):
         _, cx, cy = self.pointer.get_position()
         dt = 1 / HZ
+        if self.locked: return True
         if self.studying is not None: self.study_tick(dt); return True
         self.detect_shake(cx)
         fl = self.floor()
