@@ -9,6 +9,8 @@
   ohaiku --follow     everyone chases the pointer in a line (oneko); --play does the same
   ohaiku --recess     they play on your windows: climb onto title bars, hop between them, ride along, fall off
   ohaiku --tag        one Haiku surfs your pointer; the rest run from it; touch one and it's It
+  ohaiku --bloomcore  the bc1 eruption: ten more Haikus burst out of the tray, everyone dances on the windows,
+                      and a flower opens wherever one lands
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
@@ -208,7 +210,7 @@ class Chibi:
         if want: self.set(want); return
         # free: play
         self.rest += dt
-        if self.app.music: self.set('dance'); return
+        if self.app.music or self.app.mode == 'bloomcore': self.set('dance'); return
         if s in WORK: self.set('idle'); s = 'idle'
         if self.app.mode == 'perch' and self.rest > self.wander_at:
             self.wander = random.uniform(-90, 90) * self.sc; self.wander_at = self.rest + random.uniform(7, 16)
@@ -267,6 +269,39 @@ class Chibi:
         cr.set_source_rgba(.29, .17, .11, .8); cr.set_line_width(1.2); cr.stroke()
         cr.set_source_rgba(.29, .17, .11, .55 if (a and a.state == 'asleep') else 1)
         cr.move_to(self.W / 2 - P['tw'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); cr.show_text(P['txt'])
+
+class Flower:
+    """one of the twelve flowers, opening where a Haiku landed (Bloomcore); fades after a while"""
+    surf = {}
+
+    def __init__(self, app, x, y, kind, life=9.0):
+        self.app, self.t, self.life = app, 0.0, life
+        k = 'bloom%02d' % kind
+        if k not in Flower.surf: Flower.surf[k] = cairo.ImageSurface.create_from_png(os.path.join(SHARE, 'blooms', k + '.png'))
+        self.img = Flower.surf[k]; self.px = self.img.get_height(); self.shown = None
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(self.px, self.px)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        w.move(int(x - self.px / 2), int(y - self.px * .92))
+        if not app.hidden and not app.locked: w.show_all()
+
+    def tick(self, dt):
+        self.t += dt
+        if self.t > self.life: self.win.destroy(); return False
+        key = (min(11, int(self.t * 12)), round(min(1, (self.life - self.t) / 2), 2))
+        if key != self.shown: self.shown = key; self.win.queue_draw()
+        return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        f, a = self.shown or (0, 1)
+        cr.set_source_surface(self.img, -f * self.px, 0); cr.rectangle(0, 0, self.px, self.px); cr.clip(); cr.paint_with_alpha(a)
+        return True
+
 
 class Balloon:
     """an XP-style notification balloon pointing at a chibi (after BLISS's "Found New Hardware: Claudia")"""
@@ -333,6 +368,7 @@ class App:
         self.surfaces, self.world_ok = [], True
         self.shake, self.studying, self.peeker = [], None, None
         self.balloons, self.surfer, self.it, self.it_t = [], None, 'you', 0.0     # tag
+        self.flowers, self.party = [], []                                          # bloomcore
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -367,7 +403,7 @@ class App:
         except Exception as e:
             print('ohaiku: no recess (python-xlib?):', e, file=sys.stderr); self.world_ok = False; return
         while True:
-            if self.mode == 'recess' and not self.hidden:
+            if self.mode in ('recess', 'bloomcore') and not self.hidden:
                 try: GLib.idle_add(self.set_surfaces, W.poll())
                 except Exception as e: print('ohaiku: world:', e, file=sys.stderr)
                 time.sleep(.12)
@@ -490,12 +526,13 @@ class App:
         if self.studying is not None: self.study_tick(dt); return True
         self.detect_shake(cx)
         self.balloons = [b for b in self.balloons if b.tick(dt)]
+        self.flowers = [f for f in self.flowers if f.tick(dt)]
         if self.mode == 'tag':
             self.tag(cx, cy, dt); self.reap(); self.keep_on_top(); return True
         fl = self.floor()
         for c, tx, ty in list(self.targets(cx, cy)):
             if c.arc or c.falling: self.air(c, dt)
-            elif self.mode == 'recess' and c.state != 'spawn': self.recess(c, dt, fl)
+            elif self.mode in ('recess', 'bloomcore') and c.state != 'spawn': self.recess(c, dt, fl)
             else:
                 if self.mode == 'perch' and c.y < fl - 6 and c.state != 'spawn':     # up on a window: jump down home
                     self.leap(c, c.slot, fl, None)
@@ -595,11 +632,32 @@ class App:
         s = self.surface(sid) if sid else None
         c.off = c.x - s.x0 if s else 0.0
         c.rest, c.extra = 0.0, None; c.set('idle')
+        if self.mode == 'bloomcore':
+            self.flowers.append(Flower(self, c.x + random.uniform(-26, 26), y, random.randrange(12)))
+            while len(self.flowers) > 40: self.flowers.pop(0).win.destroy()
+
+    def erupt(self, n=10):
+        """Bloomcore: a burst of Haikus out of the tray, each flying to a window top"""
+        tx, ty = self.tray_point(); wa = self.workarea(); fl = self.floor()
+        for i in range(n):
+            if not self.unused: self.unused = list(range(1, 12)); random.shuffle(self.unused)
+            c = Chibi(self, 'haiku%02d' % self.unused.pop(), min(tx, wa.x + wa.width - 40), min(ty, fl))
+            self.pets.append(c); self.party.append(c)
+            spots = [x for x in self.surfaces if x.y > wa.y + c.cpx * .9]
+            if spots and random.random() < .75:
+                t = random.choice(spots); a, b = random.choice(t.segs); self.leap(c, random.uniform(a + 30, b - 30), t.y, t.id)
+            else:
+                self.leap(c, random.uniform(wa.x + 60, wa.x + wa.width - 60), fl, None)
+            c.arc['t'] = -i * .12                         # one after another
+        self.layout()
+        if not self.quiet:
+            try: subprocess.Popen(['paplay', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
+            except OSError: pass
 
     def air(self, c, dt):
         fl = self.floor()
         if c.arc:
-            A = c.arc; A['t'] += dt; k = min(1, A['t'] / A['T'])
+            A = c.arc; A['t'] += dt; k = max(0, min(1, A['t'] / A['T']))
             c.x = A['x0'] + (A['x1'] - A['x0']) * k
             c.y = A['y0'] + (A['y1'] - A['y0']) * k - A['h'] * 4 * k * (1 - k)
             if A['x1'] != A['x0']: c.heading = 1 if A['x1'] > A['x0'] else -1
@@ -610,7 +668,7 @@ class App:
                 else: self.land(c, A['sid'], s.y if s else fl)
             return
         c.vy += 2600 * dt; ny = c.y + c.vy * dt; c.t += dt
-        for s in (self.surfaces if self.mode == 'recess' else []):
+        for s in (self.surfaces if self.mode in ('recess', 'bloomcore') else []):
             if s.stands(c.x) and c.y <= s.y <= ny: self.land(c, s.id, s.y); return
         if ny >= fl: self.land(c, None, fl); return
         c.y = ny
@@ -627,7 +685,7 @@ class App:
         if c.next_hop is None: c.next_hop = now + random.uniform(.3, 3)
         if now > c.next_hop and c.state not in ('sleep', 'yawn', 'wake', 'alert') and (free or not c.settled):
             c.settled = True
-            c.next_hop = now + (random.uniform(5, 14) if free else 1e12)
+            c.next_hop = now + ((random.uniform(2, 5) if self.mode == 'bloomcore' else random.uniform(5, 14)) if free else 1e12)
             spots = [x for x in self.surfaces if x.y > wa.y + c.cpx * .9]
             if spots and random.random() < .8:
                 t = random.choice(spots); a, b = random.choice(t.segs); x = random.uniform(a + 30, b - 30); y, sid = t.y, t.id
@@ -683,7 +741,8 @@ class App:
                 c.set('fall'); c.t += dt; c.tick_draw()
             if t >= .5:                                   # slam: all gone
                 for c in self.pets: c.win.destroy()
-                self.pets = []
+                for f in self.flowers: f.win.destroy()
+                self.pets, self.party, self.flowers = [], [], []
                 fl = self.floor()
                 for c in self.agents.values():
                     c.win.hide(); c.shrink, c.spin = 1.0, 0.0
@@ -742,6 +801,7 @@ class App:
         item('Follow (chase the pointer)', lambda: self.set_mode('follow'))
         item('Recess (play on the windows)', lambda: self.set_mode('recess'))
         item('Tag (one surfs your pointer)', lambda: self.set_mode('tag'))
+        item('Bloomcore', lambda: self.set_mode('bloomcore'))
         item('Nothing! Studying!', self.study)
         item('Load Up Haiku', self.add_pet)
         m.append(Gtk.SeparatorMenuItem())
@@ -788,14 +848,18 @@ class App:
             for c in self.everyone(): c.win.show_all()
         else:
             if m == 'play': m = 'follow'
-            if m == 'recess' and not self.world_ok: m = 'perch'
+            if m in ('recess', 'bloomcore') and not self.world_ok: m = 'perch'
             for c in self.everyone(): c.next_hop, c.settled, c.goal = None, False, None
-            if self.mode == 'recess' and m != 'recess': self.surfaces = []
+            if self.mode in ('recess', 'bloomcore') and m not in ('recess', 'bloomcore'): self.surfaces = []
             if self.mode == 'tag' and m != 'tag':
                 if self.surfer: self.surfer.set('idle')
                 self.surfer, self.it = None, 'you'
                 for c in self.everyone(): c.speed = 400 * c.sc
             if m == 'tag': self.it, self.it_t = 'you', 0.0
+            if self.mode == 'bloomcore' and m != 'bloomcore':
+                for c in self.party: c.leave()
+                self.party = []
+            if m == 'bloomcore' and self.mode != 'bloomcore': GLib.timeout_add(800, lambda: (self.erupt(), False)[1])
             self.mode = m
             if self.hidden: self.set_mode('show')
         self.sync_menu()
@@ -808,7 +872,7 @@ class App:
         for c in cmds:
             if c == 'pet': self.add_pet()
             elif c == 'opus': self.add_pet('opus%d' % random.randrange(8))
-            elif c in ('play', 'follow', 'recess', 'tag', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
+            elif c in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
             elif c == 'studying': self.study()
 
     # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
@@ -828,7 +892,8 @@ class App:
         m.append(Gtk.SeparatorMenuItem())
         grp = None
         for key, label in (('perch', 'Perch (out of the way)'), ('follow', 'Follow (chase the pointer)'),
-                           ('recess', 'Recess (play on the windows)'), ('tag', 'Tag (one surfs your pointer)'), ('hide', 'Hide')):
+                           ('recess', 'Recess (play on the windows)'), ('tag', 'Tag (one surfs your pointer)'),
+                           ('bloomcore', 'Bloomcore'), ('hide', 'Hide')):
             r = Gtk.RadioMenuItem.new_with_label_from_widget(grp, label); grp = grp or r
             r.connect('toggled', lambda w, k=key: (not self.menu_lock and w.get_active()) and self.set_mode(k))
             m.append(r); self.radios[key] = r
@@ -865,14 +930,14 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'follow', 'recess', 'tag', 'perch', 'hide', 'show', 'toggle', 'studying'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'perch', 'hide', 'show', 'toggle', 'studying') if getattr(a, m)]
+    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying') if getattr(a, m)]
     pid = running_pid()
     if a.quit or a.restart:
         if pid:

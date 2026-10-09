@@ -32,6 +32,9 @@ Claude Code). One honest limit: a tool call is only written to the transcript wh
 the chibi shows the last tool used, and a tool waiting for your permission looks like a tool running. Claude Code hooks
 could report both exactly; that would mean adding hooks to `~/.claude/settings.json`, so it isn't done.
 
+New pets announce themselves in an XP-style balloon: *Found New Hardware: Haiku 5.5. Your new Haiku is installed and
+ready to use.* While the screen is locked they hide and hold still.
+
 Bring the pointer near the edge and they duck so only their hoods peek out. The name plates are the only part that
 takes clicks (and the whole chibi, while it's waving "?" at you):
 
@@ -52,7 +55,8 @@ Left-click it to switch between Play and Perch.
 | **Perch** | the bottom edge; free ones wander a little; duck from the pointer |
 | **Follow** | oneko: a conga line after the pointer; sleepers wake up |
 | **Recess** | shimeji: they leap onto the title bars of your real windows (`world.py` reads which window tops are visible, through python-xlib), walk along them, hop between them, ride along when you drag a window, and fall off with a "!" when it closes or something covers their spot. Working agents pick a spot and keep working there. With everything maximized there are no title bars to stand on, so they play on the floor |
-| *next* | cursor surfing (one rides your pointer, as in BLISS's "Cursor is now connected"; the sprite is baked) and tag; then Bloomcore, the bc1 eruption |
+| **Tag** | one Haiku surfs your pointer on an XP arrow ("Cursor is now connected", after BLISS); the rest run from it, slipping along the screen edges when cornered. Touch one and it's It: it chases the pointer until it tags you back |
+| **Bloomcore** | the bc1 eruption: ten more Haikus burst out of the tray and fly onto your windows, everyone dances, and one of the twelve flowers opens wherever a Haiku lands. Leaving Bloomcore folds the extras back into flowers |
 
 **Nothing! Studying!** From any tier: shake the mouse hard left and right (or `--studying`, or the menu). Everyone spins
 into the tray icon, Opus gasps, the laptop slams, "Nothing! Studying!" (Mark's Suno take from *Load Up Haiku*), and
@@ -66,6 +70,7 @@ three seconds later one Haiku peeks up by the tray and dings. They stay hidden u
 ./ohaiku --perch      # everyone on the bottom edge, out of the way (the default)
 ./ohaiku --follow     # everyone chases the pointer in a line, oneko-style (--play also works)
 ./ohaiku --recess     # they play on your windows: title bars, hops, rides, falls
+./ohaiku --tag        # one surfs your pointer, the rest run;  --bloomcore: the eruption
 ./ohaiku --studying   # "Nothing! Studying!" (or shake the mouse): all vacuumed into the tray; --show brings them back
 ./ohaiku --hide / --show / --toggle
 ./ohaiku -n 5         # five

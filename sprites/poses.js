@@ -199,3 +199,21 @@ function testSheet2() {
     g.font = '16px sans-serif'; g.fillStyle = '#555'; g.fillText(n, j * cell + 6, row * cell + 18); }); });
   return c;
 }
+
+// the twelve flowers opening (for Bloomcore: one blooms wherever a Haiku lands)
+function bakeBlooms(px) {
+  const out = {}, n = 12, s = px / 200;
+  for (let kind = 0; kind < 12; kind++) {
+    const c = document.createElement('canvas'); c.width = n * px; c.height = px;
+    const g = c.getContext('2d');
+    for (let i = 0; i < n; i++) {
+      const k = Math.min(1, i / 8);
+      g.save(); g.beginPath(); g.rect(i * px, 0, px, px); g.clip();
+      g.translate(i * px + px / 2, px * .92); g.scale(s, s);
+      drawBloom(g, 0, -64 - 40 * k, 1, k, kind, { t: i / 12, stem: 40 + 40 * k });
+      g.restore();
+    }
+    out['bloom' + String(kind).padStart(2, '0')] = c.toDataURL('image/png');
+  }
+  return out;
+}

@@ -20,4 +20,10 @@ for (const w of who) {
   index[name] = meta; console.log(name, Object.keys(strips).length + ' states');
 }
 fs.writeFileSync(path.join(out, 'sheets.json'), JSON.stringify(index, null, 1));
+{ // the blooms
+  const blooms = await page.evaluate((px) => bakeBlooms(px), Math.round(px * .5));
+  fs.mkdirSync(path.join(out, 'blooms'), { recursive: true });
+  for (const [k, png] of Object.entries(blooms)) fs.writeFileSync(path.join(out, 'blooms', k + '.png'), Buffer.from(png.split(',')[1], 'base64'));
+  console.log('blooms', Object.keys(blooms).length);
+}
 await browser.close();
