@@ -1,23 +1,47 @@
 #!/usr/bin/env python3
-"""ohaiku — Haiku 5.5 chases your cursor. After oneko (Masayuki Koba, 1989) and xneko.
+"""ohaiku — Haiku 5.5 on your desktop. After oneko (Masayuki Koba, 1989), xneko, and Plus! Dancer (2003).
 
-  ohaiku              load up a Haiku (if Haikus are already running, add one more)
+  ohaiku              start, and load up a Haiku (if already running: load up another, with a ding)
+  ohaiku --agents     start with just the agents (for autostart)
   ohaiku -n 5         load up five
-  ohaiku --opus       load up a chibi Opus instead (she joins the line)
-  ohaiku --quiet      no ding
-  ohaiku --scale 1.3  bigger Haikus (only when starting)
-  ohaiku --quit       send them home
+  ohaiku --opus       load up a chibi Opus
+  ohaiku --play       everyone chases the pointer in a line
+  ohaiku --perch      everyone back to the bottom edge, out of the way (the default)
+  ohaiku --hide       vanish (they keep watching); --show to come back
+  ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
+  ohaiku --quit       Haikus, go home
 
-The leader chases the pointer; every other Haiku follows the one in front, so they form a line. They sit when they
-catch up, dance or :3 for a bit, yawn, fall asleep with a nose bubble, and the bubble pops when you move.
-X11 with a compositor (for transparency). Every window is click-through, so they never get in the way.
+Every Claude Code session on this machine that was active in the last two hours gets a chibi of its own model, with
+its name on a little plate, standing on the bottom edge of the screen and acting out what it's doing: reading, searching
+(magnifying glass), editing (the Q.E.D. stamp), running commands (the drum), thinking (a thought cloud), sending out
+subagents (seed packets; the subagents appear beside it), asking you something (waving a "?"), done (a happy bounce),
+and asleep after twenty quiet minutes. Free ones wander and play, and dance when music is playing. Bring the pointer
+near and they duck below the edge so only their hoods peek out. The tray icon has the same controls.
+
+X11 with a compositor. Every window is click-through.
 """
-import argparse, json, math, os, random, signal, subprocess, sys, time
+import argparse, array, json, math, os, random, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 SHARE = os.path.join(HERE, 'share')
-PIDF = os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'ohaiku%s.pid' % os.environ.get('DISPLAY', '').replace(':', '-'))
+_RUN = os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'ohaiku%s' % os.environ.get('DISPLAY', '').replace(':', '-'))
+PIDF, CMDF = _RUN + '.pid', _RUN + '.cmd'
+UNKNOWN = os.path.expanduser('~/.cache/ohaiku/unknown-tools.txt')
 HZ = 30
+LABEL_H = 17
+
+# what each tool looks like; anything not here gets 'busy' and is noted in UNKNOWN, so a new drawing can be made for it
+TOOL_POSE = {
+    'Bash': 'bash', 'BashOutput': 'bash', 'KillShell': 'bash', 'Monitor': 'bash', 'TaskStop': 'bash',
+    'Read': 'read', 'NotebookRead': 'read', 'WebFetch': 'read', 'Skill': 'read', 'ReadNotifications': 'read',
+    'Grep': 'search', 'Glob': 'search', 'WebSearch': 'search', 'ToolSearch': 'search', 'ListAgents': 'search',
+    'Edit': 'edit', 'Write': 'edit', 'MultiEdit': 'edit', 'NotebookEdit': 'edit', 'Artifact': 'edit',
+    'Agent': 'agents', 'Task': 'agents', 'Workflow': 'agents', 'SendMessage': 'agents',
+    'TodoWrite': 'think', 'EnterPlanMode': 'think',
+    'AskUserQuestion': 'ask', 'ExitPlanMode': 'ask', 'PushNotification': 'ask',
+}
+TOOL_PREFIX = {'mcp__': 'search'}
+WORK = {'think', 'ask', 'done', 'bash', 'read', 'search', 'edit', 'agents', 'busy'}
 
 
 def running_pid():
@@ -29,173 +53,407 @@ def running_pid():
         return None
 
 
-class Sheet:
-    _cache = {}
-
-    def __init__(self, name, meta):
-        self.surf = cairo.ImageSurface.create_from_png(os.path.join(SHARE, name + '.png'))
-        self.cell, self.foot, self.cols, self.states = meta['cell'], meta['foot'], meta['cols'], meta['states']
+class Strips:
+    meta, surf = None, {}
 
     @classmethod
-    def get(cls, name):
-        if name not in cls._cache:
-            cls._cache[name] = Sheet(name, json.load(open(os.path.join(SHARE, 'sheets.json')))[name])
-        return cls._cache[name]
+    def info(cls, who):
+        if cls.meta is None: cls.meta = json.load(open(os.path.join(SHARE, 'sheets.json')))
+        return cls.meta[who]
 
-    def frame(self, state, t):
-        st = self.states[state]
-        f = int(t * st['fps'])
-        f = f % st['n'] if st['loop'] else min(f, st['n'] - 1)
-        return st['start'] + f
-
-    def done(self, state, t):
-        st = self.states[state]
-        return not st['loop'] and t * st['fps'] >= st['n']
+    @classmethod
+    def get(cls, who, state):
+        k = (who, state)
+        if k not in cls.surf: cls.surf[k] = cairo.ImageSurface.create_from_png(os.path.join(SHARE, who, state + '.png'))
+        return cls.surf[k]
 
 
-class Haiku:
-    def __init__(self, app, who, x, y, leader):
-        self.app, self.who, self.leader = app, who, leader
-        self.sheet = Sheet.get(who)
-        self.sc = app.scale
+class Chibi:
+    """one character: a pet (loaded up by hand) or an agent (a Claude Code session or subagent)"""
+
+    def __init__(self, app, who, x, y, agent=None, scale=1.0, label=None):
+        self.app, self.who, self.agent, self.label = app, who, agent, label
+        self.m = Strips.info(who)
+        self.sc = scale * app.scale
+        self.cpx = int(self.m['cell'] * self.sc)
         self.x, self.y = x, y
         self.heading = random.choice((-1, 1))
-        self.state, self.t, self.rest, self.extra = 'spawn', 0.0, 0.0, None
-        self.speed = (380 if leader is None else 430) * self.sc
-        self.shown = -1
-        size = int(self.sheet.cell * self.sc)
-        self.size = size
+        self.state, self.t, self.rest, self.extra, self.rev = 'spawn', 0.0, 0.0, None, False
+        self.speed = 400 * self.sc
+        self.slot = x
+        self.wander = 0.0; self.wander_at = random.uniform(6, 14)
+        self.duck = 0.0
+        self.shown, self.gone = None, False
+        self.W = self.cpx + 40 if label else self.cpx
+        self.H = self.cpx + (LABEL_H if label else 0)
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
         w.set_app_paintable(True)
         vis = w.get_screen().get_rgba_visual()
         if vis: w.set_visual(vis)
-        w.set_default_size(size, size); w.resize(size, size)
+        w.set_default_size(self.W, self.H); w.resize(self.W, self.H)
         w.set_accept_focus(False)
         w.connect('draw', self.draw)
         w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))   # click-through
         self.place()
-        w.show_all()
+        if not app.hidden: w.show_all()
 
-    # -- where it's headed --------------------------------------------------------------------
-    def target(self, cx, cy):
-        if self.leader is None:
-            return cx + 26 * self.sc, cy + self.sheet.foot[1] * .62 * self.sc
-        L = self.leader
-        return L.x - L.heading * self.sheet.cell * .5 * self.sc, L.y
+    @property
+    def foot(self): return self.m['foot'][1] * self.sc
 
-    def set(self, state):
-        if state != self.state: self.state, self.t = state, 0.0
+    # -- what it would like to be doing when it isn't running somewhere --------------------------------
+    def work(self):
+        a = self.agent
+        if a is None: return None
+        if a.state == 'think': return 'think'
+        if a.state == 'ask': return 'ask'
+        if a.state == 'done': return 'done'
+        if a.state == 'asleep': return 'sleep'
+        if a.state == 'tool':
+            p = TOOL_POSE.get(a.tool)
+            if p is None:
+                p = next((v for k, v in TOOL_PREFIX.items() if (a.tool or '').startswith(k)), 'busy')
+                self.app.note_unknown(a.tool)
+            return p
+        return None                                             # free
 
-    def step(self, dt, cx, cy, W, H):
+    def set(self, state, rev=False):
+        if state != self.state or rev != self.rev: self.state, self.t, self.rev = state, 0.0, rev
+
+    def info(self, state=None):
+        return self.m['states'][state or self.state]
+
+    def done_anim(self):
+        st = self.info(); return not st['loop'] and self.t * st['fps'] >= st['n']
+
+    def leave(self):
+        if not (self.state == 'spawn' and self.rev): self.set('spawn', rev=True)
+
+    def step(self, dt, tx, ty):
         self.t += dt
-        tx, ty = self.target(cx, cy)
-        tx = min(max(tx, self.size * .3), W - self.size * .3); ty = min(max(ty, self.size * .7), H - 4)
+        s = self.state
+        if s == 'spawn':
+            if self.done_anim():
+                if self.rev: self.gone = True; return
+                self.set('idle')
+            return
         dx, dy = tx - self.x, ty - self.y
         d = math.hypot(dx, dy)
-        s, sh = self.state, self.sheet
-        if s == 'spawn':
-            if sh.done(s, self.t): self.set('idle')
-        elif s.startswith('run'):
+        want = self.work()
+        if s == 'sleep':
+            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.agent is None): self.set('wake')
+            return
+        if s == 'wake':
+            if self.done_anim(): self.set('alert')
+            return
+        if s == 'alert':
+            if self.done_anim() and self.t > .45: self.set('idle')
+            return
+        if s == 'yawn':
+            if d > 30 * self.sc or want not in (None, 'sleep'): self.set('alert')
+            elif self.done_anim(): self.set('sleep')
+            return
+        if s.startswith('run'):
             if d < 3:
                 self.x, self.y = tx, ty; self.rest, self.extra = 0.0, None; self.set('idle')
             else:
                 k = min(1, self.speed * dt / d)
                 self.x += dx * k; self.y += dy * k
                 if abs(dx) > 2: self.heading = 1 if dx > 0 else -1
-                want = 'runF' if abs(dy) > abs(dx) * 1.4 else ('runR' if dx > 0 else 'runL')
-                if want != s and self.t > .15: self.state = want      # keep the cycle's phase; a little hysteresis
-        elif s in ('idle', 'cat', 'dance'):
-            if d > 14 * self.sc: self.run(dx, dy); return
-            self.rest += dt
-            if s == 'idle' and self.extra is None and self.rest > 3.5:
-                self.extra = random.choice(('dance', 'cat', 'idle')); self.set(self.extra)
-            elif s != 'idle' and self.t > (4.8 if s == 'dance' else 2.5):
-                self.set('idle')
-            elif s == 'idle' and self.rest > 11 + random.random() * 4:
-                self.set('yawn')
-        elif s == 'yawn':
-            if d > 30 * self.sc: self.set('alert')
-            elif sh.done(s, self.t): self.set('sleep')
-        elif s == 'sleep':
-            if d > 40 * self.sc: self.set('wake')
-        elif s == 'wake':
-            if sh.done(s, self.t): self.set('alert')
-        elif s == 'alert':
-            if sh.done(s, self.t) and self.t > .45: self.run(dx, dy)
+                w = 'runF' if abs(dy) > abs(dx) * 1.4 else ('runR' if dx > 0 else 'runL')
+                if w != s and self.t > .15: self.state = w
+            return
+        # standing still
+        if d > 14 * self.sc:
+            self.set('runF' if abs(dy) > abs(dx) * 1.4 else ('runR' if dx > 0 else 'runL')); return
+        if want == 'sleep': self.set('yawn'); return
+        if want: self.set(want); return
+        # free: play
+        self.rest += dt
+        if self.app.music: self.set('dance'); return
+        if s in WORK: self.set('idle'); s = 'idle'
+        if self.app.mode == 'perch' and self.rest > self.wander_at:
+            self.wander = random.uniform(-90, 90) * self.sc; self.wander_at = self.rest + random.uniform(7, 16)
+            return
+        if s == 'idle' and self.extra is None and self.rest > 3.5:
+            self.extra = random.choice(('dance', 'cat', 'idle')); self.set(self.extra)
+        elif s in ('cat', 'dance') and self.t > (4.8 if s == 'dance' else 2.5):
+            self.set('idle')
+        elif s == 'idle' and self.agent is None and self.rest > 25 + random.random() * 5:
+            self.set('yawn')
 
-    def run(self, dx, dy):
-        self.set('runF' if abs(dy) > abs(dx) * 1.4 else ('runR' if dx > 0 else 'runL'))
-
-    # -- drawing --------------------------------------------------------------------------------
+    # -- drawing ----------------------------------------------------------------------------------------
     def place(self):
-        self.win.move(int(self.x - self.sheet.foot[0] * self.sc), int(self.y - self.sheet.foot[1] * self.sc))
+        self.win.move(int(self.x - self.W / 2), int(self.y - self.foot))
+
+    def frame(self):
+        st = self.info()
+        f = int(self.t * st['fps'])
+        f = f % st['n'] if st['loop'] else min(f, st['n'] - 1)
+        return st['n'] - 1 - f if self.rev else f
 
     def tick_draw(self):
         self.place()
-        f = self.sheet.frame(self.state, self.t)
-        if f != self.shown:
-            self.shown = f; self.win.queue_draw()
+        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None)
+        if key != self.shown:
+            self.shown = key; self.win.queue_draw()
 
     def draw(self, w, cr):
         cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
-        sh, f = self.sheet, max(self.shown, 0)
-        c = sh.cell
+        c, f = self.m['cell'], self.frame()
+        floor = self.foot
+        cr.save()
+        cr.rectangle(0, 0, self.W, floor + 2 * self.sc); cr.clip()         # ducking: sink below the edge
+        cr.translate((self.W - self.cpx) / 2, self.duck * self.cpx * .72)
         cr.scale(self.sc, self.sc)
-        cr.set_source_surface(sh.surf, -(f % sh.cols) * c, -(f // sh.cols) * c)
+        cr.set_source_surface(Strips.get(self.who, self.state), -f * c, 0)
         cr.get_source().set_filter(cairo.FILTER_GOOD)
         cr.rectangle(0, 0, c, c); cr.fill()
+        cr.restore()
+        if self.label: self.draw_label(cr, floor)
         return True
+
+    def draw_label(self, cr, floor):
+        a = self.agent
+        cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(10 if (a and a.kind == 'sub') else 11.5)
+        txt = self.label if len(self.label) <= 18 else self.label[:17] + '…'
+        e = cr.text_extents(txt)
+        while e.x_advance + 12 > self.W - 2 and len(txt) > 4:
+            txt = txt[:-2] + '…'; e = cr.text_extents(txt)
+        pw, ph = e.x_advance + 12, LABEL_H - 3
+        x0, y0 = (self.W - pw) / 2, floor + 1
+        tone = {'ask': (.82, .9, 1), 'done': (.86, .96, .82), 'asleep': (.9, .88, .86)}.get(a.state if a else '', (1, .98, .95))
+        r = ph / 2
+        cr.new_path(); cr.arc(x0 + r, y0 + r, r, math.pi / 2, 3 * math.pi / 2); cr.arc(x0 + pw - r, y0 + r, r, -math.pi / 2, math.pi / 2); cr.close_path()
+        cr.set_source_rgba(*tone, .92); cr.fill_preserve()
+        cr.set_source_rgba(.29, .17, .11, .8); cr.set_line_width(1.2); cr.stroke()
+        cr.set_source_rgba(.29, .17, .11, .55 if (a and a.state == 'asleep') else 1)
+        cr.move_to(self.W / 2 - e.x_advance / 2, y0 + ph / 2 + e.height / 2 - 1); cr.show_text(txt)
 
 
 class App:
     def __init__(self, a):
         self.scale, self.quiet = a.scale, a.quiet
-        self.haikus = []
+        self.mode, self.hidden, self.music, self.music_on = 'perch', False, False, True
+        self.pets, self.agents = [], {}               # agents: id -> Chibi
         self.unused = list(range(1, 12)); random.shuffle(self.unused)
-        disp = Gdk.Display.get_default()
-        self.pointer = disp.get_default_seat().get_pointer()
-        scr = Gdk.Screen.get_default()
-        if not scr.is_composited():
+        self.unknown = set()
+        self.pointer = Gdk.Display.get_default().get_default_seat().get_pointer()
+        if not Gdk.Screen.get_default().is_composited():
             print('ohaiku: no compositor, so the Haikus will have boxes around them', file=sys.stderr)
-        self.raise_t = 0
-        for i in range(a.n): GLib.timeout_add(int(i * 700), self.add, 'opus' if a.opus else None)
+        self.tk = 0
+        self.show_agents = not a.no_agents
+        for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
-        for sig, fn in ((signal.SIGUSR1, lambda: self.add(None)), (signal.SIGUSR2, lambda: self.add('opus')),
-                        (signal.SIGTERM, self.quit), (signal.SIGINT, self.quit)):
-            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, (lambda f: lambda *_: (f(), True)[1])(fn))
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, lambda *_: (self.quit(), True)[1])
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, lambda *_: (self.quit(), True)[1])
+        threading.Thread(target=self.watch, daemon=True).start()
+        self.tray()
 
-    def screen(self):
-        g = Gdk.Display.get_default().get_monitor_at_point(*self.pointer.get_position()[1:]).get_geometry()
-        return g.x + g.width, g.y + g.height
+    # -- background watchers: the agents, and whether music is playing ----------------------------------
+    def watch(self):
+        import agents
+        last_music = 0
+        while True:
+            try:
+                res = agents.scan() if self.show_agents else []
+                GLib.idle_add(self.got_agents, res)
+            except Exception as e:
+                print('ohaiku: scan failed:', e, file=sys.stderr)
+            if self.music_on and time.time() - last_music > 2:
+                last_music = time.time(); m = self.listen()
+                if m != self.music: GLib.idle_add(self.set_music, m)
+            time.sleep(1.5)
 
-    def add(self, who=None):
+    def set_music(self, m):
+        self.music = m and self.music_on; return False
+
+    def listen(self):
+        try:
+            p = subprocess.Popen(['parec', '--device=@DEFAULT_MONITOR@', '--format=s16le', '--rate=8000', '--channels=1',
+                                  '--latency-msec=50'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            b = p.stdout.read(3200); p.kill(); p.wait()
+            v = array.array('h', b[:len(b) // 2 * 2])
+            return len(v) > 0 and math.sqrt(sum(x * x for x in v) / len(v)) > 300
+        except OSError:
+            return False
+
+    def note_unknown(self, tool):
+        if not tool or tool in self.unknown: return
+        self.unknown.add(tool)
+        try:
+            os.makedirs(os.path.dirname(UNKNOWN), exist_ok=True)
+            seen = set(open(UNKNOWN).read().split()) if os.path.exists(UNKNOWN) else set()
+            if tool not in seen: open(UNKNOWN, 'a').write(tool + '\n')
+        except OSError: pass
+
+    def got_agents(self, res):
+        ids, new = set(), []
+        for a in res:
+            ids.add(a.id)
+            c = self.agents.get(a.id)
+            if c is None:
+                wa = self.workarea()
+                c = Chibi(self, a.look, wa.x + wa.width - 80, self.floor(), agent=a, scale=.62 if a.kind == 'sub' else .82,
+                          label=a.name)
+                self.agents[a.id] = c; new.append(c)
+            else:
+                c.agent = a
+        for k, c in list(self.agents.items()):
+            if k not in ids: c.leave()
+        self.layout()
+        for c in new: c.x = c.slot; c.place()            # bloom where they'll stand
+        return False
+
+    # -- where everyone stands ---------------------------------------------------------------------------
+    def workarea(self):
+        # the pointer's monitor, minus panels (clamped to the monitor: some window managers report odd work areas)
+        x, y = self.pointer.get_position()[1:]
+        mon = Gdk.Display.get_default().get_monitor_at_point(x, y)
+        g, w = mon.get_geometry(), mon.get_workarea()
+        r = Gdk.Rectangle()
+        r.x, r.y = max(g.x, w.x), max(g.y, w.y)
+        root = Gdk.get_default_root_window()
+        r.width = min(g.x + g.width, w.x + w.width, root.get_width()) - r.x
+        r.height = min(g.y + g.height, w.y + w.height, root.get_height()) - r.y
+        return r if r.width > 200 and r.height > 200 else g
+
+    def floor(self):
+        wa = self.workarea(); return wa.y + wa.height - LABEL_H
+
+    def order(self):
+        sess = sorted((c for c in self.agents.values() if c.agent.kind == 'session'), key=lambda c: c.agent.born)
+        ids = {s.agent.id for s in sess}
+        out = []
+        for s in sess:
+            out.append(s)
+            out += sorted((c for c in self.agents.values() if c.agent.kind == 'sub' and c.agent.parent == s.agent.id),
+                          key=lambda c: c.agent.born)
+        out += [c for c in self.agents.values() if c.agent.kind == 'sub' and c.agent.parent not in ids]
+        return out + self.pets
+
+    def layout(self):
+        wa = self.workarea(); x = wa.x + wa.width - 60
+        for c in self.order():
+            w = c.cpx * .7 + 6
+            c.slot = x - w / 2; x -= w
+
+    def targets(self, cx, cy):
+        if self.mode == 'play':
+            prev = None
+            for c in self.order():
+                if prev is None: yield c, cx + 26 * c.sc, cy + c.foot * .62
+                else: yield c, prev.x - prev.heading * prev.cpx * .5, prev.y
+                prev = c
+        else:
+            fl = self.floor()
+            for c in self.order():
+                yield c, c.slot + (c.wander if c.work() is None else 0), fl
+
+    def tick(self):
+        _, cx, cy = self.pointer.get_position()
+        for c, tx, ty in list(self.targets(cx, cy)):
+            c.step(1 / HZ, tx, ty)
+            near = self.mode == 'perch' and abs(cx - c.x) < c.cpx * .45 + 30 and c.y - c.foot - 30 < cy < c.y + 40
+            c.duck += (float(near) - c.duck) * min(1, 8 / HZ)
+            if c.duck < .01: c.duck = 0
+            c.tick_draw()
+        for k, c in list(self.agents.items()):
+            if c.gone: c.win.destroy(); del self.agents[k]
+        for c in [p for p in self.pets if p.gone]: c.win.destroy(); self.pets.remove(c)
+        self.tk += 1
+        if os.environ.get('OHAIKU_DEBUG') and self.tk % HZ == 0:
+            wa = self.workarea()
+            print('wa', wa.x, wa.y, wa.width, wa.height, 'mode', self.mode, [(c.label, c.state, int(c.x), int(c.y), int(c.slot)) for c in self.order()], flush=True)
+        if self.tk % (HZ * 2) == 0 and not self.hidden:
+            for c in self.everyone():
+                gw = c.win.get_window()
+                if gw: gw.raise_()
+        return True
+
+    def everyone(self): return list(self.agents.values()) + self.pets
+
+    # -- loading up, modes, commands -----------------------------------------------------------------------
+    def add_pet(self, who=None):
         if who is None:
-            if not any(h.who == 'haiku00' for h in self.haikus): who = 'haiku00'      # the canonical one comes first
+            if not any(p.who == 'haiku00' for p in self.pets): who = 'haiku00'
             else:
                 if not self.unused: self.unused = list(range(1, 12)); random.shuffle(self.unused)
                 who = 'haiku%02d' % self.unused.pop()
         _, cx, cy = self.pointer.get_position()
-        W, H = self.screen()
+        wa = self.workarea()
         a = random.uniform(0, 2 * math.pi); r = random.uniform(160, 300) * self.scale
-        x = min(max(cx + r * math.cos(a), 100), W - 100); y = min(max(cy + r * math.sin(a) + 120, 200), H - 10)
-        self.haikus.append(Haiku(self, who, x, y, self.haikus[-1] if self.haikus else None))
+        x = min(max(cx + r * math.cos(a), wa.x + 100), wa.x + wa.width - 100)
+        y = min(max(cy + r * math.sin(a) + 120, wa.y + 200), wa.y + wa.height - LABEL_H)
+        self.pets.append(Chibi(self, who, x, y))
+        self.layout()
         if not self.quiet:
             try: subprocess.Popen(['paplay', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
             except OSError: pass
         return False
 
-    def tick(self):
-        _, cx, cy = self.pointer.get_position()
-        W, H = self.screen()
-        for h in self.haikus:
-            h.step(1 / HZ, cx, cy, W, H); h.tick_draw()
-        self.raise_t += 1
-        if self.raise_t % (HZ * 2) == 0:          # popups can get buried by newly raised windows; climb back on top
-            for h in self.haikus:
-                gw = h.win.get_window()
-                if gw: gw.raise_()
-        return True
+    def set_mode(self, m):
+        if m == 'hide':
+            self.hidden = True
+            for c in self.everyone(): c.win.hide()
+        elif m == 'show':
+            self.hidden = False
+            for c in self.everyone(): c.win.show_all()
+        else:
+            self.mode = m
+            if self.hidden: self.set_mode('show')
+        self.sync_menu()
+
+    def command(self):
+        try:
+            cmds = open(CMDF).read().split(); os.unlink(CMDF)
+        except OSError:
+            cmds = ['pet']
+        for c in cmds:
+            if c == 'pet': self.add_pet()
+            elif c == 'opus': self.add_pet('opus%d' % random.randrange(8))
+            elif c in ('play', 'perch', 'hide', 'show'): self.set_mode(c)
+
+    # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
+    def tray(self):
+        self.menu_lock, self.radios = False, {}
+        try:
+            self.icon = Gtk.StatusIcon.new_from_file(os.path.join(HERE, 'sprites', 'icon.png'))
+        except Exception:
+            self.icon = None; return
+        self.icon.set_tooltip_text('ohaiku')
+        m = self.menu = Gtk.Menu()
+
+        def item(label, fn):
+            it = Gtk.MenuItem(label=label); it.connect('activate', lambda *_: fn()); m.append(it)
+        item('Load Up Haiku', self.add_pet)
+        item('Load Up Opus', lambda: self.add_pet('opus%d' % random.randrange(8)))
+        m.append(Gtk.SeparatorMenuItem())
+        grp = None
+        for key, label in (('play', 'Play (chase the pointer)'), ('perch', 'Perch (out of the way)'), ('hide', 'Hide')):
+            r = Gtk.RadioMenuItem.new_with_label_from_widget(grp, label); grp = grp or r
+            r.connect('toggled', lambda w, k=key: (not self.menu_lock and w.get_active()) and self.set_mode(k))
+            m.append(r); self.radios[key] = r
+        m.append(Gtk.SeparatorMenuItem())
+        ck = Gtk.CheckMenuItem(label='Dance Only When Music Plays'); ck.set_active(True)
+        ck.connect('toggled', lambda w: (setattr(self, 'music_on', w.get_active()), setattr(self, 'music', False)))
+        m.append(ck)
+        ag = Gtk.CheckMenuItem(label='Show Agents'); ag.set_active(self.show_agents)
+        ag.connect('toggled', lambda w: setattr(self, 'show_agents', w.get_active())); m.append(ag)
+        m.append(Gtk.SeparatorMenuItem())
+        item('Haikus, Go Home', self.quit)
+        m.show_all()
+        self.icon.connect('popup-menu', lambda i, b, t: m.popup(None, None, Gtk.StatusIcon.position_menu, i, b, t))
+        self.icon.connect('activate', lambda *_: self.set_mode('play' if self.mode == 'perch' else 'perch'))
+        self.sync_menu()
+
+    def sync_menu(self):
+        if not self.radios: return
+        self.menu_lock = True
+        self.radios['hide' if self.hidden else self.mode].set_active(True)
+        self.menu_lock = False
 
     def quit(self):
         try: os.unlink(PIDF)
@@ -204,23 +462,30 @@ class App:
 
 
 def main():
-    p = argparse.ArgumentParser(description='Haiku 5.5 chases your cursor.')
-    p.add_argument('-n', type=int, default=1, help='how many to load up')
+    p = argparse.ArgumentParser(description='Haiku 5.5 on your desktop.')
+    p.add_argument('-n', type=int, default=None, help='how many to load up')
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
+    p.add_argument('--agents', action='store_true', help='start with just the agents')
+    p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
+    for m in ('play', 'perch', 'hide', 'show'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
+    modes = [m for m in ('play', 'perch', 'hide', 'show') if getattr(a, m)]
     pid = running_pid()
     if a.quit:
         if pid: os.kill(pid, signal.SIGTERM)
         return
-    if pid:                                       # already running: add to the line
-        for i in range(a.n):
-            os.kill(pid, signal.SIGUSR2 if a.opus else signal.SIGUSR1)
-            if i < a.n - 1: time.sleep(.7)
+    if pid:                                       # already running: tell it
+        cmds = modes[:]
+        if not modes or a.n or a.opus: cmds += ['opus' if a.opus else 'pet'] * (a.n or 1)
+        for c in cmds:
+            open(CMDF, 'w').write(c); os.kill(pid, signal.SIGUSR1)
+            time.sleep(.7 if c in ('pet', 'opus') else .15)
         return
+    a.n = a.n if a.n is not None else (0 if a.agents else 1)
     if not a.fg:
         if os.fork(): return                      # detach, like oneko &
         os.setsid()
@@ -230,7 +495,9 @@ def main():
     gi.require_version('Gtk', '3.0'); gi.require_version('Gdk', '3.0')
     from gi.repository import Gtk, Gdk, GLib
     import cairo
-    App(a)
+    sys.path.insert(0, HERE)
+    app = App(a)
+    for m in modes: app.set_mode(m)
     Gtk.main()
 
 

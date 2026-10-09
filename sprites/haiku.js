@@ -1128,6 +1128,9 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
     M.arms[i] = [18, 2 + w, 14];
     if (move === 'idle') M.arms[1 - i] = [6, -4, 30];        // the other paw shields the eyes from the waiting
   }
+  if (prop === 'read') { M.arms = [[-12, 18, 34], [-12, 18, 34]]; M.armBend = 1; }
+  if (prop === 'search') { const i = V.side > 0 ? 1 : 0; M.arms[i] = [14, -26, 30]; M.armBend = 1; }
+  if (pose.arms) pose.arms.forEach((a, i) => { if (a) M.arms[i] = a; });
   if (per.robot) M.feet = [[-26, -30, 26], [26, -30, 26]];
   const lift = per.robot ? 1 : 0;
   // the stamp takes over the whole body: wind up, slam on the beat, squash, lift
@@ -1250,6 +1253,8 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
     K.shape('sat', crSpline([[hx - 16, hy - 12], [hx + 16, hy - 12], [hx + 18, hy + 14], [hx - 18, hy + 14]], true, 3), '#a06a3c', { tex: .2, lw: 2.2 });
     _hkPacket(K, 'pkS', hx - 4, hy - 16, -.2, V.v + 7);
   }
+  if (prop === 'read') _hkReadBook(K, b, V);
+  if (prop === 'search') _hkGlass(K, paw, V.side > 0 ? 1 : -1, b);
   if (prop === 'bar') { const a = arms[V.side > 0 ? 1 : 0]; _hkSign(K, a.W[0], a.W[1], V.side, Math.sin(b * Math.PI) * .06, pose.propK != null ? clamp(pose.propK) * 100 : 92, b); _hkSleeve(K, 'armS', a.S, a.E, a.W, V, V.hood, V.hoodShade); }
   g.restore();
 }
@@ -1558,4 +1563,33 @@ function _hkStamp(K, sx, sy, hit) {
   K.ell(-5, -70, 3.4, 2.6, 'rgba(255,255,255,.7)');
   g.restore();
   if (hit) for (let i = 0; i < 7; i++) { const a = Math.PI * (i - 3) / 9; K.ink('shit' + i, [[sx + Math.sin(a) * 44, sy - 4 + Math.cos(a) * -2], [sx + Math.sin(a) * 66, sy - 8 - Math.abs(Math.cos(a)) * 8]], 2.6, { alpha: .9 }); }
+}
+
+// --- ohaiku props: an open PROBLEM SET held up to read, and a magnifying glass ---------------------------------
+function _hkReadBook(K, b, V) {
+  // an open book held in front of the chest, spine towards us; a page turns every two beats
+  const cx = 0, cy = -104, w = 62, h = 46, tilt = .05 * Math.sin(b * Math.PI / 2);
+  const g = K.g; g.save(); g.translate(cx, cy); g.rotate(tilt);
+  const cov = '#3f7f72', covD = '#2a554c', page = '#fbf5e6';
+  K.shape('rbcovL', [[0, 4], [-w - 6, -4], [-w - 4, h + 4], [0, h + 10]], covD, { tex: .15, lw: 2.4 });
+  K.shape('rbcovR', [[0, 4], [w + 6, -4], [w + 4, h + 4], [0, h + 10]], cov, { tex: .15, lw: 2.4 });
+  K.shape('rbpL', [[0, 2], [-w, -8], [-w, h], [0, h + 6]], page, { tex: .06, lw: 2 });
+  K.shape('rbpR', [[0, 2], [w, -8], [w, h], [0, h + 6]], page, { tex: .06, lw: 2 });
+  for (let i = 0; i < 4; i++) for (const sd of [-1, 1]) K.ink('rbl' + i + sd, [[sd * 8, 8 + i * 9 - 2], [sd * (w - 8), 1 + i * 9 - 5]], 1.1, { alpha: .45, taper: false });
+  const u = _hkFrac(b / 2);
+  if (u > .6) {            // the turning page, right to left
+    const k = (u - .6) / .4, x = w * Math.cos(Math.PI * k);
+    K.shape('rbturn', [[0, 2], [x, -8 - 10 * Math.sin(Math.PI * k)], [x, h - 10 * Math.sin(Math.PI * k)], [0, h + 6]], '#fffaf3', { tex: .04, lw: 1.8 });
+  }
+  g.restore();
+}
+function _hkGlass(K, paw, side, b) {
+  // held up to one eye, which it magnifies; scanning side to side
+  const sw = 6 * Math.sin(b * Math.PI / 2), lx = side * 22 + sw, ly = -192, R = 27;
+  K.ink('mgH', [[paw[0], paw[1]], [lx + side * R * .62, ly + R * .7]], 7, { color: '#7a4a26', taper: false });
+  const g = K.g; g.save();
+  g.fillStyle = 'rgba(200,230,245,.28)'; g.beginPath(); g.arc(lx, ly, R, 0, 7); g.fill();
+  g.restore();
+  K.loop('mgR', polyCircle(lx, ly, R, R, 20), 4.6);
+  K.ink('mgS', [[lx - R * .55, ly - R * .2], [lx - R * .25, ly - R * .55]], 3, { color: '#ffffff', alpha: .85, taper: false });
 }

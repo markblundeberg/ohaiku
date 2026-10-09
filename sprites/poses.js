@@ -46,7 +46,8 @@ function ohBang(g, x, y, k = 1) {
 // ---------------------------------------------------------------------------------------------
 const OH_BPM = 100;
 function ohStates(who) {
-  const base = who === 'opus' ? { persona: 'opus', variant: 0 } : { variant: who };
+  const isOpus = typeof who === 'string' && who.startsWith('opus');
+  const base = isOpus ? { persona: 'opus', variant: +(who.slice(4) || 0) } : { variant: who };
   const H = (g, pose, x = 0, y = 0) => drawHaiku(g, x, y, 1, { ...base, ...pose });
   const lie = (g, t, o = {}) => {        // asleep on its side; the nose is up near (-118, -128) after the turn
     g.save(); g.translate(110, -40); g.rotate(-Math.PI / 2 + .08);
@@ -68,14 +69,53 @@ function ohStates(who) {
   S.alert = { fps: 12, loop: false, n: 6, f: (g, i) => { H(g, { t: i / 12, move: 'freeze', freeze: 0, beat: 0, expr: 'o' }); ohBang(g, 80, -270, ease.outBack ? ease.outBack(clamp(i / 3)) : clamp(i / 3) * 1.1); } };
   S.spawn = { fps: 12, loop: false, n: 20, f: (g, i) => {
     const t = i / 12, bk = clamp(i / 8);
-    if (i < 15) drawBloom(g, 0, -70 + 30 * (1 - bk), 1.5 * (i < 10 ? 1 : 1 - (i - 10) / 5), bk, typeof who === 'number' ? who : 0, { t, stem: 60 * bk });
+    if (i < 15) drawBloom(g, 0, -70 + 30 * (1 - bk), 1.5 * (i < 10 ? 1 : 1 - (i - 10) / 5), bk, isOpus ? base.variant : who, { t, stem: 60 * bk });
     if (i >= 8) {        // pops up out of the bloom: grows from the flower's heart, lands with a bounce
       const k = clamp((i - 8) / 5);
       g.save(); g.translate(0, -70 * (1 - k)); g.scale(ease.outBack(k), ease.outBack(k));
       H(g, { t, move: 'bounce', beat: (i - 8) * .125, expr: 'joy' }); g.restore();
     }
   } };
+  // --- agent work: what the session is doing right now ---
+  const beatAt = (i, step = .125) => i * step;
+  S.think = { fps: 13.33, loop: true, n: 32, f: (g, i) => {
+    H(g, { t: i / 13.33, move: 'idle', beat: beatAt(i), expr: 'neutral', mouth: 'flat', look: [.5, -.6], arms: [null, [-24, -22, 34]] });
+    ohThink(g, 70, -280, i / 32);
+  } };
+  S.bash = { fps: 13.33, loop: true, n: 16, f: (g, i) => H(g, { t: i / 13.33, move: 'march', facing: 0, beat: beatAt(i), prop: 'drum', expr: 'determined' }) };
+  S.edit = { fps: 13.33, loop: true, n: 32, f: (g, i) => H(g, { t: i / 13.33, move: 'idle', beat: beatAt(i), prop: 'stamp', expr: 'determined' }, 0, -46) };
+  S.read = { fps: 13.33, loop: true, n: 32, f: (g, i) => H(g, { t: i / 13.33, move: 'idle', beat: beatAt(i), prop: 'read', expr: 'neutral', look: [0, .7] }) };
+  S.search = { fps: 13.33, loop: true, n: 32, f: (g, i) => H(g, { t: i / 13.33, move: 'idle', beat: beatAt(i), prop: 'search', expr: 'o', yaw: .22 * Math.sin(i / 32 * Math.PI * 2) }) };
+  S.agents = { fps: 13.33, loop: true, n: 32, f: (g, i) => H(g, { t: i / 13.33, move: 'bounce', beat: beatAt(i), prop: 'seeds', expr: 'fang' }) };
+  S.busy = { fps: 13.33, loop: true, n: 32, f: (g, i) => H(g, { t: i / 13.33, move: 'armpump', beat: beatAt(i), expr: 'determined' }) };
+  S.ask = { fps: 13.33, loop: true, n: 16, f: (g, i) => {
+    const u = (i % 8) / 8, wv = Math.sin(u * Math.PI * 2);
+    H(g, { t: i / 13.33, move: 'idle', beat: beatAt(i), expr: 'o', arms: [null, [44 + 10 * wv, -58, 4]] });
+    ohAsk(g, -70, -300, i);
+  } };
+  S.done = { fps: 13.33, loop: true, n: 16, f: (g, i) => H(g, { t: i / 13.33, move: 'bounce', beat: beatAt(i), expr: 'joy' }) };
   return S;
+}
+// a thought cloud with dots that fill in one by one
+function ohThink(g, x, y, u) {
+  g.save(); g.fillStyle = '#fffaf3'; g.strokeStyle = '#4a2c1c'; g.lineWidth = 4.5;
+  for (const [dx, dy, r] of [[-38, 70, 7], [-22, 50, 11]]) { g.beginPath(); g.arc(x + dx, y + dy, r, 0, 7); g.fill(); g.stroke(); }
+  g.beginPath();
+  for (const [dx, dy, r] of [[-24, 4, 22], [0, -10, 26], [26, 0, 22], [8, 16, 20], [-12, 16, 18]]) { g.moveTo(x + dx + r, y + dy); g.arc(x + dx, y + dy, r, 0, 7); }
+  g.stroke(); g.fill();
+  const n = Math.floor(u * 4) % 4;
+  g.fillStyle = '#4a2c1c'; for (let i = 0; i < 3; i++) { g.globalAlpha = i < n ? 1 : .2; g.beginPath(); g.arc(x - 18 + i * 18, y + 4, 5.5, 0, 7); g.fill(); }
+  g.restore();
+}
+// a "?" in a speech bubble: the agent wants you
+function ohAsk(g, x, y, i) {
+  const k = 1 + .06 * Math.sin(i / 16 * Math.PI * 4);
+  g.save(); g.translate(x, y); g.scale(k, k);
+  g.fillStyle = '#fffaf3'; g.strokeStyle = '#4a2c1c'; g.lineWidth = 5; g.lineJoin = 'round';
+  g.beginPath(); g.ellipse(0, 0, 44, 38, 0, 0, 7); g.moveTo(14, 34); g.lineTo(34, 62); g.lineTo(30, 28); g.fill(); g.stroke();
+  g.fillStyle = '#fffaf3'; g.beginPath(); g.ellipse(0, 0, 41, 35, 0, 0, 7); g.fill();
+  g.font = font(64, 'Fraunces', 900); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#2f6fb0'; g.fillText('?', 0, 4);
+  g.restore();
 }
 
 function testSheet() {
@@ -110,22 +150,27 @@ function testSheet() {
   return c;
 }
 
-// one sprite sheet for `who` (a variant number, or 'opus'), cells of `px` pixels; returns { png (dataURL), meta }
-function bakeSheet(who, px) {
-  const S = ohStates(who), names = Object.keys(S), s = px / OH.cellU;
-  const total = names.reduce((a, k) => a + S[k].n, 0), cols = Math.ceil(Math.sqrt(total)), rows = Math.ceil(total / cols);
-  const c = document.createElement('canvas'); c.width = cols * px; c.height = rows * px;
-  const g = c.getContext('2d'), meta = { cell: px, foot: [px / 2, Math.round(OH.footU * s)], cols, states: {} };
-  let k = 0;
-  for (const name of names) {
-    const st = S[name]; meta.states[name] = { start: k, n: st.n, fps: st.fps, loop: st.loop };
-    for (let i = 0; i < st.n; i++, k++) {
-      const x = (k % cols) * px, y = Math.floor(k / cols) * px;
-      g.save(); g.beginPath(); g.rect(x, y, px, px); g.clip();
-      g.translate(x + px / 2, y + OH.footU * s); g.scale(s, s);
-      st.f(g, i);
-      g.restore();
+// one strip per state for `who` (a Haiku variant number, or 'opus0'..'opus7'), cells of `px` pixels
+function bakeStrips(who, px) {
+  const S = ohStates(who), s = px / OH.cellU, out = {}, meta = { cell: px, foot: [px / 2, Math.round(OH.footU * s)], states: {} };
+  for (const [name, st] of Object.entries(S)) {
+    const c = document.createElement('canvas'); c.width = st.n * px; c.height = px;
+    const g = c.getContext('2d');
+    for (let i = 0; i < st.n; i++) {
+      g.save(); g.beginPath(); g.rect(i * px, 0, px, px); g.clip();
+      g.translate(i * px + px / 2, OH.footU * s); g.scale(s, s); st.f(g, i); g.restore();
     }
+    out[name] = c.toDataURL('image/png'); meta.states[name] = { n: st.n, fps: st.fps, loop: st.loop };
   }
-  return { png: c.toDataURL('image/png'), meta };
+  return { out, meta };
+}
+
+function testSheet2() {
+  const s = .5, cell = OH.cellU * s, names = ['think', 'bash', 'edit', 'read', 'search', 'agents', 'busy', 'ask', 'done'];
+  const c = document.createElement('canvas'); c.width = cell * names.length; c.height = cell * 2;
+  const g = c.getContext('2d'); g.fillStyle = '#e8e4dc'; g.fillRect(0, 0, c.width, c.height);
+  [0, 'opus2'].forEach((who, row) => { const S = ohStates(who); names.forEach((n, j) => {
+    g.save(); g.translate(j * cell + cell / 2, row * cell + OH.footU * s); g.scale(s, s); S[n].f(g, 5); g.restore();
+    g.font = '16px sans-serif'; g.fillStyle = '#555'; g.fillText(n, j * cell + 6, row * cell + 18); }); });
+  return c;
 }
