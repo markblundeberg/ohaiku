@@ -86,6 +86,25 @@ def _parse(path):
     return parsed
 
 
+_names = {}
+
+
+def _whole_file_names(path):
+    """the latest customTitle / agentName anywhere in the transcript (once per session; the tail may not have one)"""
+    if path in _names: return _names[path]
+    title = aname = None
+    try:
+        with open(path, 'rb') as f:
+            for ln in f:
+                if b'"custom-title"' in ln or b'"agent-name"' in ln:
+                    try: e = json.loads(ln)
+                    except ValueError: continue
+                    title = e.get('customTitle') or title; aname = e.get('agentName') or aname
+    except OSError: pass
+    _names[path] = (title, aname)
+    return title, aname
+
+
 def _look(model, sid, kind):
     """which sprite: the model's own chibi, a stable variant per session"""
     h = int(hashlib.sha1(sid.encode()).hexdigest(), 16)
@@ -103,19 +122,20 @@ def scan(within=2 * 3600, now=None):
         sid = os.path.basename(path)[:-6]
         try: p = _parse(path)
         except OSError: continue
-        title = p['title']
+        title, aname = p['title'], p['aname']
+        if not title and not aname: title, aname = _whole_file_names(path)
         tf = os.path.join(os.path.dirname(path), sid, 'custom-title.json')
         if not title and os.path.exists(tf):
             try: title = json.load(open(tf)).get('customTitle')
             except (OSError, ValueError): pass
-        name = title or p['aname'] or (os.path.basename(p['cwd']) if p['cwd'] else sid[:8])
+        name = title or aname or (os.path.basename(p['cwd']) if p['cwd'] else sid[:8])
         age = now - mt
         state = p['state']
         tool = p['tool']
         if state in ('think', 'tool') and age > 15 * 60: state = 'free'          # stalled, or closed mid-turn
         elif state == 'think' and age > 12 and p['last_tool']: state, tool = 'tool', p['last_tool']   # (see above)
         if state == 'free': state = 'done' if age < DONE_S else ('asleep' if age > SLEEP_S else 'free')
-        out.append(Agent(kind='session', id=sid, parent=None, name=name, state=state, tool=tool, model=p['model'],
+        out.append(Agent(kind='session', id=sid, parent=None, name=name, names=[n for n in (title, aname) if n], state=state, tool=tool, model=p['model'],
                          age=age, look=_look(p['model'], sid, 'session'), born=os.path.getctime(path)))
         # subagents: shown while they run, and briefly once they finish
         for sp in glob.glob(os.path.join(os.path.dirname(path), sid, 'subagents', 'agent-*.jsonl')):
@@ -135,7 +155,7 @@ def scan(within=2 * 3600, now=None):
             desc = ''
             try: desc = json.load(open(sp[:-6] + '.meta.json')).get('description', '')
             except (OSError, ValueError): pass
-            out.append(Agent(kind='sub', id=aid, parent=sid, name=desc or 'helper', state=sst, tool=stool,
+            out.append(Agent(kind='sub', id=aid, parent=sid, name=desc or 'helper', names=[n for n in (title, aname) if n], state=sst, tool=stool,
                              model=q['model'], age=sage, look=_look(q['model'], aid, 'sub'), born=os.path.getctime(sp)))
     return out
 

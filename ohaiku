@@ -16,9 +16,9 @@ its name on a little plate, standing on the bottom edge of the screen and acting
 (magnifying glass), editing (the Q.E.D. stamp), running commands (the drum), thinking (a thought cloud), sending out
 subagents (seed packets; the subagents appear beside it), asking you something (waving a "?"), done (a happy bounce),
 and asleep after twenty quiet minutes. Free ones wander and play, and dance when music is playing. Bring the pointer
-near and they duck below the edge so only their hoods peek out. Click a name plate to send that one away until its
-session wants you again (asks something or finishes a turn); right-click a plate for the menu. The tray icon has the
-same menu; middle-click it to hide or show everyone.
+near and they duck below the edge so only their hoods peek out. Click a name plate (or a chibi waving "?") to go to
+that session's terminal window; middle-click a plate to send that one away until its session wants you again; right-click
+for the menu. Middle-click the tray icon to hide or show everyone.
 
 X11 with a compositor. Every window is click-through.
 """
@@ -121,12 +121,16 @@ class Chibi:
 
     def shape_input(self):
         if not self.label: self.win.input_shape_combine_region(cairo.Region()); return    # pets: click-through
-        P = self.plate(); r = cairo.RectangleInt(int(P['x']), int(P['y']), int(P['w']) + 1, int(P['h']) + 1)
-        self.win.input_shape_combine_region(cairo.Region(r))
+        P = self.plate(); reg = cairo.Region(cairo.RectangleInt(int(P['x']), int(P['y']), int(P['w']) + 1, int(P['h']) + 1))
+        self.calling = bool(self.agent and self.agent.state == 'ask')
+        if self.calling:          # waving at you: the whole chibi is a button
+            reg.union(cairo.RectangleInt(int(self.W / 2 - self.cpx * .3), int(self.foot - self.cpx * .8), int(self.cpx * .6), int(self.cpx * .8)))
+        self.win.input_shape_combine_region(reg)
 
     def clicked(self, w, ev):
-        if ev.button == 1: self.app.dismiss(self)
-        elif ev.button == 3 and getattr(self.app, 'menu', None): self.app.menu.popup_at_pointer(ev)
+        if ev.button == 1: self.app.focus(self)
+        elif ev.button == 2: self.app.dismiss(self)
+        elif ev.button == 3: self.app.agent_menu(self).popup_at_pointer(ev)
         return True
 
     # -- what it would like to be doing when it isn't running somewhere --------------------------------
@@ -222,6 +226,7 @@ class Chibi:
 
     def tick_draw(self):
         self.place()
+        if self.label and getattr(self, 'calling', None) is not None and self.calling != (self.agent.state == 'ask'): self.shape_input()
         key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None)
         if key != self.shown:
             self.shown = key; self.win.queue_draw()
@@ -401,6 +406,47 @@ class App:
         return True
 
     def everyone(self): return list(self.agents.values()) + self.pets
+
+    def focus(self, c):
+        """raise the terminal window this session runs in (Claude Code titles it after the session); else Claude Desktop"""
+        a = c.agent
+        if a is None: return
+        if a.kind == 'sub':
+            parent = self.agents.get(a.parent)
+            if parent: a = parent.agent
+        names = set(a.names or [a.name])
+        try:
+            wins = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=2).stdout.splitlines()
+        except (OSError, subprocess.SubprocessError):
+            wins = []
+        for ln in wins:
+            parts = ln.split(None, 3)
+            if len(parts) < 4: continue
+            title = parts[3]
+            if title[:1] and not title[0].isalnum(): title = title[1:].strip()      # Claude Code's ✳ / spinner
+            if title in names:
+                subprocess.Popen(['wmctrl', '-i', '-a', parts[0]]); return
+        # not in a terminal here: the Desktop app's "Sessions Waiting for You" (opens it if it's closed)
+        url = 'claude://code/needs-input?source=desktop_action' if a.state in ('ask', 'done', 'free') else 'claude://code/continue?session=last&source=desktop_action'
+        try: subprocess.Popen(['xdg-open', url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError: pass
+
+    def agent_menu(self, c):
+        m = Gtk.Menu()
+        def item(label, fn):
+            it = Gtk.MenuItem(label=label); it.connect('activate', lambda *_: fn()); m.append(it)
+        if c.agent:
+            item('Go to %s' % (c.agent.name if c.agent.kind == 'session' else 'its session'), lambda: self.focus(c))
+            item('Send away until needed', lambda: self.dismiss(c))
+            m.append(Gtk.SeparatorMenuItem())
+        item('Play (chase the pointer)', lambda: self.set_mode('play'))
+        item('Perch (out of the way)', lambda: self.set_mode('perch'))
+        item('Hide everyone', lambda: self.set_mode('hide'))
+        item('Load Up Haiku', self.add_pet)
+        m.append(Gtk.SeparatorMenuItem())
+        item('Haikus, Go Home', self.quit)
+        m.show_all(); self._last_menu = m
+        return m
 
     def dismiss(self, c):
         if c.agent:
