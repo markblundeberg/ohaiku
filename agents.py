@@ -58,11 +58,14 @@ def _parse(path):
     ents = _tail_entries(path)
     state, tool, last_tool, model, title, aname, cwd = None, None, None, None, None, None, None
     sends = []                                        # recent SendMessage calls: (tool_use id, to, timestamp)
+    ai, entry = None, None
     for e in ents:                                    # newest first
         t = e.get('type')
         if t == 'custom-title' and title is None: title = e.get('customTitle')
         if t == 'agent-name' and aname is None: aname = e.get('agentName')
         if cwd is None and e.get('cwd'): cwd = e['cwd']
+        if t == 'ai-title' and ai is None: ai = e.get('aiTitle')
+        if entry is None and e.get('entrypoint'): entry = e['entrypoint']
         m = e.get('message') or {}
         if model is None and t == 'assistant' and m.get('model') and not m['model'].startswith('<'): model = m['model']
         if t == 'assistant':
@@ -86,7 +89,7 @@ def _parse(path):
             else: state = 'think'
         elif t == 'system':
             if e.get('subtype') == 'turn_duration': state = 'free'
-    parsed = dict(state=state or 'free', tool=tool if state in ('tool', 'ask') else None, last_tool=last_tool, sends=sends, model=model or '', title=title,
+    parsed = dict(state=state or 'free', tool=tool if state in ('tool', 'ask') else None, last_tool=last_tool, sends=sends, ai=ai, entry=entry, model=model or '', title=title,
                   aname=aname, cwd=cwd)
     _cache[path] = (st.st_mtime, st.st_size, parsed)
     return parsed
@@ -115,17 +118,18 @@ def _first_time(path):
 def _whole_file_names(path):
     """the latest customTitle / agentName anywhere in the transcript (once per session; the tail may not have one)"""
     if path in _names: return _names[path]
-    title = aname = None
+    title = aname = ai = None
     try:
         with open(path, 'rb') as f:
             for ln in f:
-                if b'"custom-title"' in ln or b'"agent-name"' in ln:
+                if b'"custom-title"' in ln or b'"agent-name"' in ln or b'"ai-title"' in ln:
                     try: e = json.loads(ln)
                     except ValueError: continue
                     title = e.get('customTitle') or title; aname = e.get('agentName') or aname
+                    ai = e.get('aiTitle') or ai
     except OSError: pass
-    _names[path] = (title, aname)
-    return title, aname
+    _names[path] = (title, aname, ai)
+    return title, aname, ai
 
 
 def _look(model, sid, kind):
@@ -160,14 +164,16 @@ def scan(within=2 * 3600, now=None):
         if now - mt > within and not L: continue
         try: p = _parse(path)
         except OSError: continue
-        title, aname = p['title'], p['aname']
-        if not title and not aname: title, aname = _whole_file_names(path)
+        if not L and p['entry'] == 'cli': continue          # a command-line session whose process has exited: closed
+        title, aname, ai = p['title'], p['aname'], p['ai']
+        if not title and not aname:
+            t2, a2, ai2 = _whole_file_names(path); title, aname, ai = t2, a2, ai or ai2
         tf = os.path.join(os.path.dirname(path), sid, 'custom-title.json')
         if not title and os.path.exists(tf):
             try: title = json.load(open(tf)).get('customTitle')
             except (OSError, ValueError): pass
         if L and L.get('name'): title = L['name']
-        name = title or aname or (os.path.basename(p['cwd']) if p['cwd'] else sid[:8])
+        name = title or aname or ai or (os.path.basename(p['cwd']) if p['cwd'] else sid[:8])
         age = now - mt
         state = p['state']
         tool = p['tool']
