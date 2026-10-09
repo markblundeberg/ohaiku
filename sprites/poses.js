@@ -91,6 +91,42 @@ function ohStates(who) {
     H(g, { t: i / 12, move: 'idle', beat: 0, expr: 'joy', arms: [[56, -6 + 10 * sw, 0], [56, -6 - 10 * sw, 0]] }, 0, -22);
     g.restore();
   } };
+  // --- movie night (after MST3K's silhouette row): seen from behind, in a cinema seat, headphones on ---
+  const seat = (g, i, o = {}) => {
+    const t = i / 12, bob = o.bob ?? 2.5 * Math.sin(i / 24 * Math.PI * 4), sh = o.shake || 0;
+    g.save(); g.translate(sh, bob);
+    H(g, { t, move: 'idle', beat: 0, yaw: o.yaw ?? Math.PI, blink: 0 }, 0, 0);
+    // headphones over the hood
+    const hx = 0, hy = -196;
+    g.lineCap = 'round'; g.strokeStyle = '#2b2b33'; g.lineWidth = 11;
+    g.beginPath(); g.arc(hx, hy + 6, 82, Math.PI * 1.12, Math.PI * 1.88); g.stroke();
+    g.strokeStyle = '#55556a'; g.lineWidth = 3.5; g.beginPath(); g.arc(hx, hy + 6, 82, Math.PI * 1.2, Math.PI * 1.5); g.stroke();
+    for (const sd of [-1, 1]) {
+      g.fillStyle = '#2b2b33'; g.beginPath(); g.roundRect(hx + sd * 84 - 13, hy - 18, 26, 46, 11); g.fill();
+      g.fillStyle = '#d97757'; g.beginPath(); g.roundRect(hx + sd * 84 - 6, hy - 10, 12, 30, 6); g.fill();
+    }
+    if (o.popcorn) {                                   // a striped bucket on the armrest, and a kernel on its way up
+      const bx = 74, by = -120;
+      g.save(); g.translate(bx, by);
+      g.beginPath(); g.moveTo(-26, -40); g.lineTo(26, -40); g.lineTo(18, 20); g.lineTo(-18, 20); g.closePath(); g.fillStyle = '#fffaf3'; g.fill();
+      g.save(); g.clip(); g.fillStyle = '#c4283a'; for (let k = -3; k <= 3; k += 2) g.fillRect(k * 9 - 4, -44, 9, 70); g.restore();
+      g.strokeStyle = '#4a2c1c'; g.lineWidth = 3; g.stroke();
+      g.fillStyle = '#fff3cf'; for (let k = 0; k < 6; k++) { g.beginPath(); g.arc(-20 + k * 8, -44 - (k % 2) * 6, 8, 0, 7); g.fill(); }
+      g.restore();
+      const u = (i % 24) / 24;
+      if (u < .5) { g.fillStyle = '#fff3cf'; g.beginPath(); g.arc(bx - 30 - 60 * u, by - 60 - 120 * Math.sin(Math.PI * u), 7, 0, 7); g.fill(); }
+    }
+    g.restore();
+    // the seat back in front: a dark velvet silhouette
+    g.save();
+    g.fillStyle = '#2a1416'; g.beginPath(); g.roundRect(-104, -112, 208, 130, 26); g.fill();
+    g.fillStyle = '#4a2026'; g.beginPath(); g.roundRect(-92, -104, 184, 18, 9); g.fill();
+    g.restore();
+  };
+  S.watch = { fps: 12, loop: true, n: 24, f: (g, i) => seat(g, i) };
+  S.munch = { fps: 12, loop: true, n: 24, f: (g, i) => seat(g, i, { popcorn: true }) };
+  S.giggle = { fps: 12, loop: true, n: 12, f: (g, i) => seat(g, i, { bob: -3 + 4 * (i % 2), shake: (i % 2 ? 3 : -3), yaw: Math.PI * .9 }) };
+  S.whisper = { fps: 12, loop: false, n: 24, f: (g, i) => seat(g, i, { bob: 0, yaw: Math.PI - .55 * Math.sin(Math.PI * Math.min(1, i / 20)) }) };
   // --- agent work: what the session is doing right now ---
   const beatAt = (i, step = .125) => i * step;
   S.think = { fps: 13.33, loop: true, n: 32, f: (g, i) => {
@@ -216,4 +252,24 @@ function bakeBlooms(px) {
     out['bloom' + String(kind).padStart(2, '0')] = c.toDataURL('image/png');
   }
   return out;
+}
+
+function testSheet4() {
+  const s = .5, cell = OH.cellU * s, names = ['watch', 'munch', 'giggle', 'whisper'];
+  const c = document.createElement('canvas'); c.width = cell * 4; c.height = cell;
+  const g = c.getContext('2d'); g.fillStyle = '#334'; g.fillRect(0, 0, c.width, c.height);
+  names.forEach((n, j) => { const S = ohStates(j * 3); g.save(); g.translate(j * cell + cell / 2, OH.footU * s); g.scale(s, s); S[n].f(g, 10); g.restore(); });
+  return c;
+}
+function testSheet3() {
+  const s = .5, cell = OH.cellU * s, n = 6;
+  const c = document.createElement('canvas'); c.width = cell * n; c.height = cell;
+  const g = c.getContext('2d'); g.fillStyle = '#e8e4dc'; g.fillRect(0, 0, c.width, c.height);
+  [Math.PI, Math.PI * .85, Math.PI * 1.15].forEach((yaw, j) => {
+    g.save(); g.translate(j * cell + cell / 2, OH.footU * s); g.scale(s, s); drawHaiku(g, 0, 0, 1, { t: 0, variant: j * 3, move: 'idle', beat: 0, yaw }); g.restore();
+  });
+  [Math.PI].forEach((yaw, j) => {
+    g.save(); g.translate((j + 3) * cell + cell / 2, OH.footU * s); g.scale(s, s); drawHaiku(g, 0, 0, 1, { t: 0, persona: 'opus', variant: 2, move: 'idle', beat: 0, yaw }); g.restore();
+  });
+  return c;
 }

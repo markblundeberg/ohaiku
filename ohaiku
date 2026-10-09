@@ -11,6 +11,8 @@
   ohaiku --tag        one Haiku surfs your pointer; the rest run from it; touch one and it's It
   ohaiku --bloomcore  the bc1 eruption: ten more Haikus burst out of the tray, everyone dances on the windows,
                       and a flower opens wherever one lands
+  ohaiku --movie      movie night: they open a window, put on one of our films (muted), and watch it from a row
+                      of cinema seats, headphones on. In Recess and Bloomcore they sometimes do this by themselves
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
@@ -270,6 +272,68 @@ class Chibi:
         cr.set_source_rgba(.29, .17, .11, .55 if (a and a.state == 'asleep') else 1)
         cr.move_to(self.W / 2 - P['tw'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); cr.show_text(P['txt'])
 
+class Theater:
+    """Movie night: the pets' own window, playing our films on mute (after MST3K, they sit in a row in front of it)"""
+
+    def __init__(self, app, x, y):
+        self.app, self.t = app, 0.0
+        root = os.path.join(SHARE, 'tv')
+        self.reels = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))) if os.path.isdir(root) else []
+        random.shuffle(self.reels)
+        self.ri, self.frames, self.shown, self.pix = 0, [], None, None
+        w = self.win = Gtk.Window(title='Haiku Theater 3000')
+        w.set_accept_focus(False); w.set_focus_on_map(False)
+        self.area = Gtk.DrawingArea(); self.area.set_size_request(448, 252); w.add(self.area)
+        self.area.connect('draw', self.draw)
+        w.connect('delete-event', lambda *_: (app.theater_closed(), False)[1])
+        w.move(int(x), int(y))
+        self.load()
+        if not app.hidden and not app.locked: self.show()
+
+    def show(self):
+        # opened without taking focus, so the window manager would tuck it under your active window; put it on top
+        # (raise_() is ignored for a window that never had focus; a moment of keep-above lifts it without focus)
+        self.win.show_all()
+        self.win.set_keep_above(True)
+        GLib.timeout_add(400, lambda: (self.win.set_keep_above(False), False)[1])
+
+    def load(self):
+        if not self.reels: self.frames = []; return
+        name = self.reels[self.ri % len(self.reels)]
+        d = os.path.join(SHARE, 'tv', name)
+        self.frames = sorted(os.path.join(d, f) for f in os.listdir(d))
+        self.win.set_title('Haiku Theater 3000 \u2014 %s.mp4 (muted)' % name)
+        self.t = 0.0
+
+    def tick(self, dt):
+        self.t += dt
+        if not self.frames: return
+        f = int(self.t * 12)
+        if f >= len(self.frames):
+            self.ri += 1; self.load(); f = 0
+        if f != self.shown:
+            self.shown = f
+            try: self.pix = GdkPixbuf.Pixbuf.new_from_file(self.frames[f])
+            except Exception: self.pix = None
+            self.area.queue_draw()
+
+    def draw(self, w, cr):
+        W, H = w.get_allocated_width(), w.get_allocated_height()
+        cr.set_source_rgb(0, 0, 0); cr.paint()
+        if self.pix:
+            k = min(W / self.pix.get_width(), H / self.pix.get_height())
+            cr.translate((W - self.pix.get_width() * k) / 2, (H - self.pix.get_height() * k) / 2); cr.scale(k, k)
+            Gdk.cairo_set_source_pixbuf(cr, self.pix, 0, 0); cr.paint()
+        return True
+
+    def seats(self, n):
+        gw = self.area.get_window()
+        if gw is None: return None
+        o = gw.get_origin(); ox, oy = (o[1], o[2]) if len(o) == 3 else o
+        W, H = self.area.get_allocated_width(), self.area.get_allocated_height()
+        return [(ox + W * (i + .5) / n, oy + H + 6) for i in range(n)]
+
+
 class Flower:
     """one of the twelve flowers, opening where a Haiku landed (Bloomcore); fades after a while"""
     surf = {}
@@ -369,6 +433,7 @@ class App:
         self.shake, self.studying, self.peeker = [], None, None
         self.balloons, self.surfer, self.it, self.it_t = [], None, 'you', 0.0     # tag
         self.flowers, self.party = [], []                                          # bloomcore
+        self.theater, self.audience, self.last_movie = None, [], time.time()       # movie night
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -490,7 +555,7 @@ class App:
     def floor(self):
         wa = self.workarea(); return wa.y + wa.height - LABEL_H
 
-    def order(self):
+    def order(self):  # (the audience isn't in this: they're in their seats)
         sess = sorted((c for c in self.agents.values() if c.agent.kind == 'session'), key=lambda c: c.agent.born)
         ids = {s.agent.id for s in sess}
         out = []
@@ -527,6 +592,9 @@ class App:
         self.detect_shake(cx)
         self.balloons = [b for b in self.balloons if b.tick(dt)]
         self.flowers = [f for f in self.flowers if f.tick(dt)]
+        if self.theater and not self.hidden: self.audience_tick(dt)
+        if self.mode in ('recess', 'bloomcore') and not self.theater and time.time() - self.last_movie > 240 and random.random() < dt / 90:
+            self.movie()                                  # it's their playtime; sometimes they put a film on
         if self.mode == 'tag':
             self.tag(cx, cy, dt); self.reap(); self.keep_on_top(); return True
         fl = self.floor()
@@ -560,7 +628,62 @@ class App:
                 gw = c.win.get_window()
                 if gw: gw.raise_()
 
-    def everyone(self): return list(self.agents.values()) + self.pets
+    def everyone(self): return list(self.agents.values()) + self.pets + self.audience
+
+    # -- movie night ----------------------------------------------------------------------------------------
+    def movie(self):
+        if self.theater: self.theater.win.close(); return
+        if not os.path.isdir(os.path.join(SHARE, 'tv')): print('ohaiku: no films; run make_tv.sh', file=sys.stderr); return
+        wa = self.workarea()
+        x = wa.x + 60 + random.uniform(0, max(1, wa.width * .5 - 500))
+        y = wa.y + wa.height - 252 - 150 - random.uniform(0, max(1, wa.height * .3))
+        self.theater = Theater(self, x, y)
+        n = 3
+        free = [p for p in self.pets if p is not self.surfer and p.state != 'spawn' and not p.gone][:n]
+        for p in free: self.pets.remove(p)
+        while len(free) < n:
+            if not self.unused: self.unused = list(range(1, 12)); random.shuffle(self.unused)
+            free.append(Chibi(self, 'haiku%02d' % self.unused.pop(), x + random.uniform(0, 448), self.floor(), scale=.8))
+        for i, c in enumerate(free):
+            c.seat, c.seated, c.arc, c.falling, c.on = i, False, None, False, None
+            c.next_fidget = time.time() + random.uniform(4, 12)
+            self.leap(c, x + 224, y, None); c.arc['t'] = -.5 - i * .35       # one after another, once the window is up
+        self.audience = free
+        self.last_movie = time.time()
+        self.layout()
+
+    def theater_closed(self):
+        self.theater = None
+        for c in self.audience:                        # "!" and back to whatever everyone else is doing
+            c.arc, c.seated = None, False; c.set('alert'); self.pets.append(c)
+        self.audience = []
+        self.layout()
+
+    def audience_tick(self, dt):
+        T = self.theater
+        T.tick(dt)
+        seats = T.seats(len(self.audience))
+        if not seats: return
+        now = time.time()
+        for c in self.audience:
+            sx, sy = seats[c.seat]
+            if not c.seated:
+                if c.arc:
+                    c.arc['x1'], c.arc['y1'] = sx, sy
+                    A = c.arc; A['t'] += dt; k = max(0, min(1, A['t'] / A['T']))
+                    c.x = A['x0'] + (A['x1'] - A['x0']) * k; c.y = A['y0'] + (A['y1'] - A['y0']) * k - A['h'] * 4 * k * (1 - k)
+                    c.t += dt
+                    if k >= 1: c.arc = None
+                else:
+                    c.seated = True; c.set('watch')
+            else:
+                c.x, c.y = sx, sy; c.t += dt
+                if c.state == 'whisper' and c.done_anim(): c.set('watch')
+                if now > c.next_fidget:
+                    c.next_fidget = now + random.uniform(4, 12)
+                    c.set(random.choice(('watch', 'watch', 'munch', 'giggle', 'whisper')))
+            c.duck = 0
+            c.tick_draw()
 
     def balloon(self, c, title, body='', life=4.0):
         self.balloons = [b for b in self.balloons if not (b.who is c and (b.win.destroy() or True))]
@@ -582,7 +705,7 @@ class App:
         self.it_t += dt
         it = self.it if (self.it == 'you' or (self.it in self.everyone() and not self.it.gone)) else 'you'
         self.it = it
-        for c in self.everyone():
+        for c in self.order():
             if c is S or c.state == 'spawn': continue
             if c.arc or c.falling: self.air(c, dt); c.tick_draw(); continue
             dx, dy = c.x - cx, (c.y - c.foot * .5) - cy
@@ -722,6 +845,7 @@ class App:
         if self.studying is not None: return
         self.studying = 0.0; self.shake = []
         self.vac_to = self.tray_point()
+        if self.theater: self.theater.win.hide()
         for c in self.everyone():
             c.arc, c.falling, c.goal = None, False, None
             c.vac_from = (c.x, c.y); c.vac_delay = random.uniform(0, .12)
@@ -742,7 +866,9 @@ class App:
             if t >= .5:                                   # slam: all gone
                 for c in self.pets: c.win.destroy()
                 for f in self.flowers: f.win.destroy()
-                self.pets, self.party, self.flowers = [], [], []
+                for c in self.audience: c.win.destroy()
+                if self.theater: self.theater.win.destroy(); self.theater = None
+                self.pets, self.party, self.flowers, self.audience = [], [], [], []
                 fl = self.floor()
                 for c in self.agents.values():
                     c.win.hide(); c.shrink, c.spin = 1.0, 0.0
@@ -802,6 +928,7 @@ class App:
         item('Recess (play on the windows)', lambda: self.set_mode('recess'))
         item('Tag (one surfs your pointer)', lambda: self.set_mode('tag'))
         item('Bloomcore', lambda: self.set_mode('bloomcore'))
+        item('Movie Night', self.movie)
         item('Nothing! Studying!', self.study)
         item('Load Up Haiku', self.add_pet)
         m.append(Gtk.SeparatorMenuItem())
@@ -843,9 +970,11 @@ class App:
         if m == 'hide':
             self.hidden = True
             for c in self.everyone(): c.win.hide()
+            if self.theater: self.theater.win.hide()
         elif m == 'show':
             self.hidden = False
             for c in self.everyone(): c.win.show_all()
+            if self.theater: self.theater.show()
         else:
             if m == 'play': m = 'follow'
             if m in ('recess', 'bloomcore') and not self.world_ok: m = 'perch'
@@ -874,6 +1003,7 @@ class App:
             elif c == 'opus': self.add_pet('opus%d' % random.randrange(8))
             elif c in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
             elif c == 'studying': self.study()
+            elif c == 'movie': self.movie()
 
     # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
     def tray(self):
@@ -897,6 +1027,7 @@ class App:
             r = Gtk.RadioMenuItem.new_with_label_from_widget(grp, label); grp = grp or r
             r.connect('toggled', lambda w, k=key: (not self.menu_lock and w.get_active()) and self.set_mode(k))
             m.append(r); self.radios[key] = r
+        item('Movie Night', self.movie)
         item('Nothing! Studying!  (or shake the mouse)', self.study)
         m.append(Gtk.SeparatorMenuItem())
         ck = Gtk.CheckMenuItem(label='Dance Only When Music Plays'); ck.set_active(True)
@@ -930,14 +1061,14 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie'): p.add_argument('--' + m, action='store_true')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying') if getattr(a, m)]
+    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie') if getattr(a, m)]
     pid = running_pid()
     if a.quit or a.restart:
         if pid:
@@ -959,14 +1090,14 @@ def main():
         if os.fork(): return                      # detach, like oneko &
         os.setsid()
     open(PIDF, 'w').write('%d\n' % os.getpid())
-    global Gtk, Gdk, GLib, cairo                  # GTK only after the fork
+    global Gtk, Gdk, GLib, GdkPixbuf, cairo                  # GTK only after the fork
     import gi
     gi.require_version('Gtk', '3.0'); gi.require_version('Gdk', '3.0')
-    from gi.repository import Gtk, Gdk, GLib
+    from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
     import cairo
     sys.path.insert(0, HERE)
     app = App(a)
-    for m in modes: app.study() if m == 'studying' else app.set_mode(m)
+    for m in modes: app.study() if m == 'studying' else app.movie() if m == 'movie' else app.set_mode(m)
     Gtk.main()
 
 

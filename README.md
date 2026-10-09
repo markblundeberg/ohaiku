@@ -58,6 +58,13 @@ Left-click it to switch between Play and Perch.
 | **Tag** | one Haiku surfs your pointer on an XP arrow ("Cursor is now connected", after BLISS); the rest run from it, slipping along the screen edges when cornered. Touch one and it's It: it chases the pointer until it tags you back |
 | **Bloomcore** | the bc1 eruption: ten more Haikus burst out of the tray and fly onto your windows, everyone dances, and one of the twelve flowers opens wherever a Haiku lands. Leaving Bloomcore folds the extras back into flowers |
 
+**Movie night** (after MST3K's silhouette row): `--movie` or the menu. The pets open their own window, *Haiku Theater
+3000*, put on one of our films on mute (*Load Up Haiku*, *Load Up Opus*; `./make_tv.sh` extracts them from the bc1/bc2
+renders), and three of them hop into a row of velvet cinema seats along its bottom edge, seen from behind with headphones
+on: bobbing, eating popcorn, giggling, turning to whisper. It's a real window: move it and they move with it, stand on
+it in Recess, close it and they jump up with a "!". It never takes focus. In Recess and Bloomcore they sometimes put a
+film on by themselves (at most every four minutes).
+
 **Nothing! Studying!** From any tier: shake the mouse hard left and right (or `--studying`, or the menu). Everyone spins
 into the tray icon, Opus gasps, the laptop slams, "Nothing! Studying!" (Mark's Suno take from *Load Up Haiku*), and
 three seconds later one Haiku peeks up by the tray and dings. They stay hidden until you click the tray icon.
