@@ -13,14 +13,14 @@ page.on('pageerror', e => console.error('[pageerror]', e.message));
 await page.goto(pathToFileURL(path.join(here, 'bake.html')).href); await page.evaluate(() => window.ready);
 const index = fs.existsSync(path.join(out, 'sheets.json')) ? JSON.parse(fs.readFileSync(path.join(out, 'sheets.json'))) : {};
 for (const w of who) {
-  const { out: strips, meta } = await page.evaluate((w, px) => bakeStrips(w, px), w, px);
+  const { out: strips, meta } = await page.evaluate((w, px, only) => bakeStrips(w, px, only), w, px, arg('states', '') ? arg('states').split(',') : null);
   const name = typeof w === 'string' ? w : `haiku${String(w).padStart(2, '0')}`;
   fs.mkdirSync(path.join(out, name), { recursive: true });
   for (const [st, png] of Object.entries(strips)) fs.writeFileSync(path.join(out, name, st + '.png'), Buffer.from(png.split(',')[1], 'base64'));
   index[name] = meta; console.log(name, Object.keys(strips).length + ' states');
 }
 fs.writeFileSync(path.join(out, 'sheets.json'), JSON.stringify(index, null, 1));
-{ // the blooms
+if (!arg('states', '')) { // the blooms
   const blooms = await page.evaluate((px) => bakeBlooms(px), Math.round(px * .5));
   fs.mkdirSync(path.join(out, 'blooms'), { recursive: true });
   for (const [k, png] of Object.entries(blooms)) fs.writeFileSync(path.join(out, 'blooms', k + '.png'), Buffer.from(png.split(',')[1], 'base64'));

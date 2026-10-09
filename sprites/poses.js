@@ -91,6 +91,21 @@ function ohStates(who) {
     H(g, { t: i / 12, move: 'idle', beat: 0, expr: 'joy', arms: [[56, -6 + 10 * sw, 0], [56, -6 - 10 * sw, 0]] }, 0, -22);
     g.restore();
   } };
+  // --- Flying Haikus (After Dark's Flying Toasters): petal wings, gliding down and to the left ---
+  S.fly = { fps: 12, loop: true, n: 8, f: (g, i) => {
+    const flap = Math.sin(i / 8 * Math.PI * 2);
+    g.save(); g.translate(0, -40); g.rotate(-.18);
+    for (const sd of [1, -1]) {                       // wings behind the shoulders
+      g.save(); g.translate(sd * 18, -150); g.rotate(sd * (-.35 - .75 * flap) - Math.PI / 2 * (sd > 0 ? 0 : 0));
+      g.fillStyle = sd > 0 ? '#fff0f4' : '#f6d6e2'; g.strokeStyle = '#4a2c1c'; g.lineWidth = 5;
+      for (const [len, w, a] of [[150, 44, -.15], [124, 38, .25], [96, 30, .6]]) {
+        g.save(); g.rotate(sd * a); g.beginPath(); g.ellipse(sd * len / 2, 0, len / 2, w / 2, 0, 0, 7); g.fill(); g.stroke(); g.restore();
+      }
+      g.restore();
+    }
+    H(g, { t: i / 12, move: 'idle', beat: 0, expr: 'joy', yaw: -.4, arms: [[30, 10, -20], [30, 10, -20]] });
+    g.restore();
+  } };
   // --- lemmings: floating under a dandelion, dazed after a long fall, blocking, building with the Q.E.D. stamp ---
   S.float = { fps: 12, loop: true, n: 16, f: (g, i) => {
     const sw = Math.sin(i / 16 * Math.PI * 2);
@@ -232,9 +247,10 @@ function testSheet() {
 }
 
 // one strip per state for `who` (a Haiku variant number, or 'opus0'..'opus7'), cells of `px` pixels
-function bakeStrips(who, px) {
+function bakeStrips(who, px, only) {
   const S = ohStates(who), s = px / OH.cellU, out = {}, meta = { cell: px, foot: [px / 2, Math.round(OH.footU * s)], states: {} };
   for (const [name, st] of Object.entries(S)) {
+    if (only && !only.includes(name)) continue;
     const c = document.createElement('canvas'); c.width = st.n * px; c.height = px;
     const g = c.getContext('2d');
     for (let i = 0; i < st.n; i++) {
@@ -275,7 +291,7 @@ function bakeBlooms(px) {
 }
 
 function testSheet5() {
-  const s = .5, cell = OH.cellU * s, names = ['float', 'dizzy', 'block', 'build'];
+  const s = .5, cell = OH.cellU * s, names = ['float', 'dizzy', 'fly', 'build'];
   const c = document.createElement('canvas'); c.width = cell * 4; c.height = cell;
   const g = c.getContext('2d'); g.fillStyle = '#e8e4dc'; g.fillRect(0, 0, c.width, c.height);
   names.forEach((n, j) => { const S = ohStates(j * 2 + 1); g.save(); g.translate(j * cell + cell / 2, OH.footU * s); g.scale(s, s); S[n].f(g, 5); g.restore(); });

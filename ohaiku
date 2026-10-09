@@ -16,6 +16,10 @@
   ohaiku --lemmings   "Let's go!": ten Haikus drop from a trapdoor over your windows and march for the flower door.
                       Click one to build (Q.E.D. bricks), middle-click to float (dandelion), right-click to block.
                       If you don't play, a director does.  --ohno nukes them ("Oh no!")
+  ohaiku --fly        Flying Haikus (After Dark's Flying Toasters); also the screensaver after --saver minutes idle
+                      (default 5, 0 = never); move the mouse and they scatter
+  ohaiku --kaiju      chibi Opus, five times the size, stomps along the bottom; everyone hides (rarely by itself, too)
+  ohaiku --clippy     "It looks like you're...": a balloon about your active window (now and then by itself in play)
   ohaiku --snow       petal snow (xsnow, bloomcore edition): petals pile up on your title bars; on during Bloomcore
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray, silently (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
@@ -41,6 +45,7 @@ _RUN = os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'ohaiku%s' % os.e
 PIDF, CMDF = _RUN + '.pid', _RUN + '.cmd'
 UNKNOWN = os.path.expanduser('~/.cache/ohaiku/unknown-tools.txt')
 HZ = 30
+CASCADE_MIN = float(os.environ.get('OHAIKU_CASCADE_MIN', 8 * 60))   # seconds of work that earn a Solitaire cascade
 LABEL_H = 17
 
 # what each tool looks like; anything not here gets 'busy' and is noted in UNKNOWN, so a new drawing can be made for it
@@ -463,6 +468,153 @@ class LemOverlay:
         return True
 
 
+class Overlay:
+    """a full-screen, click-through, transparent window to paint on"""
+
+    def __init__(self, app, draw):
+        self.app = app
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        scr = Gdk.Screen.get_default(); self.W, self.H = scr.get_width(), scr.get_height()
+        w.resize(self.W, self.H); w.move(0, 0)
+        w.connect('draw', draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        if not app.hidden and not app.locked: w.show_all()
+
+
+class Cascade:
+    """Windows Solitaire's win: a chibi that just finished a long stretch of work bounces off across the screen,
+    leaving a copy of itself every frame on a canvas that is never cleared"""
+
+    def __init__(self, app, c):
+        self.app, self.c, self.t, self.alpha = app, c, 0.0, 1.0
+        self.ov = Overlay(app, self.draw)
+        self.can = cairo.ImageSurface(cairo.FORMAT_ARGB32, self.ov.W, self.ov.H)
+        self.img = Strips.get(c.who, 'done'); self.cell = c.m['cell']; self.sc = c.sc
+        self.x, self.y = c.x - c.cpx / 2, c.y - c.foot
+        wa = app.workarea()
+        self.vx = (-1 if c.x > wa.x + wa.width / 2 else 1) * random.uniform(220, 380)
+        self.vy = -random.uniform(500, 800); self.floor = app.floor() - c.foot; self.done = False
+        c.win.hide(); app.balloon(c, 'Done!', '', 1.0)
+
+    def tick(self, dt):
+        self.t += dt
+        if not self.done:
+            self.vy += 1900 * dt; self.x += self.vx * dt; self.y += self.vy * dt
+            if self.y > self.floor: self.y = self.floor; self.vy *= -.82
+            cr = cairo.Context(self.can)
+            cr.translate(self.x, self.y); cr.scale(self.sc, self.sc)
+            f = int(self.t * 13.33) % 16
+            cr.set_source_surface(self.img, -f * self.cell, 0); cr.rectangle(0, 0, self.cell, self.cell); cr.fill()
+            if self.x < -200 or self.x > self.ov.W + 50: self.done, self.t = True, 0.0
+        else:
+            self.alpha = max(0, 1 - max(0, self.t - 1.5))
+            if self.alpha <= 0:
+                self.ov.win.destroy()
+                if not self.c.gone and not self.app.hidden: self.c.win.show_all()
+                return False
+        self.ov.win.queue_draw()
+        return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        cr.set_source_surface(self.can, 0, 0); cr.paint_with_alpha(self.alpha)
+        return True
+
+
+class Flyer:
+    """After Dark's Flying Toasters, but Haikus with petal wings: the screensaver"""
+
+    def __init__(self, app, who, x, y, sc):
+        self.app, self.x, self.y, self.t = app, x, y, random.uniform(0, 1)
+        self.sc = sc; self.img = Strips.get(who, 'fly'); self.cell = Strips.info(who)['cell']; self.px = int(self.cell * sc)
+        self.vx, self.vy = -random.uniform(90, 130) * sc, random.uniform(45, 70) * sc
+        self.leaving, self.shown = False, None
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(self.px, self.px)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        w.move(int(x), int(y))
+        if not app.hidden and not app.locked: w.show_all()
+
+    def tick(self, dt, W, H):
+        self.t += dt
+        k = 6 if self.leaving else 1
+        self.x += self.vx * dt * k; self.y += self.vy * dt * k
+        if self.x < -self.px or self.y > H:
+            if self.leaving: self.win.destroy(); return False
+            if random.random() < .5: self.x, self.y = W + random.uniform(0, 200), random.uniform(-self.px, H * .5)
+            else: self.x, self.y = random.uniform(W * .3, W + 200), -self.px - random.uniform(0, 200)
+        self.win.move(int(self.x), int(self.y))
+        f = int(self.t * 12) % 8
+        if f != self.shown: self.shown = f; self.win.queue_draw()
+        return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        cr.scale(self.sc, self.sc); cr.set_source_surface(self.img, -(self.shown or 0) * self.cell, 0)
+        cr.get_source().set_filter(cairo.FILTER_GOOD); cr.rectangle(0, 0, self.cell, self.cell); cr.fill()
+        return True
+
+
+class Kaiju:
+    """very rarely: chibi Opus, five times the size, stomps along the bottom of the screen while everyone hides"""
+
+    def __init__(self, app, who='opus0'):
+        self.app, self.t = app, 0.0
+        root = os.path.join(SHARE, 'kaiju')
+        self.meta = json.load(open(os.path.join(root, 'sheets.json')))[who]
+        wa = app.workarea()
+        self.dir = random.choice((-1, 1))
+        self.img = cairo.ImageSurface.create_from_png(os.path.join(root, who, ('runR' if self.dir > 0 else 'runL') + '.png'))
+        self.cell = self.meta['cell']; self.foot = self.meta['foot'][1]
+        self.x = wa.x - self.cell / 2 if self.dir > 0 else wa.x + wa.width + self.cell / 2
+        self.end = wa.x + wa.width + self.cell / 2 if self.dir > 0 else wa.x - self.cell / 2
+        self.shown = None
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(self.cell, self.cell)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        self.place()
+        if not app.hidden and not app.locked: w.show_all()
+
+    def place(self):
+        f = int(self.t * 5) % 8
+        bob = -6 * abs(math.sin(self.t * 5 * math.pi / 4))
+        self.win.move(int(self.x - self.cell / 2), int(self.app.floor() + LABEL_H - self.foot + bob))
+
+    def tick(self, dt):
+        self.t += dt; self.x += self.dir * 110 * dt; self.place()
+        f = int(self.t * 5) % 8
+        if f != self.shown: self.shown = f; self.win.queue_draw()
+        if (self.x - self.end) * self.dir > 0: self.win.destroy(); return False
+        return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        cr.set_source_surface(self.img, -(self.shown or 0) * self.cell, 0); cr.rectangle(0, 0, self.cell, self.cell); cr.fill()
+        return True
+
+
+CLIPPY = [   # (window-title pattern, the balloon)
+    (r'(?i)\bx\.com\b|twitter| / X\b|Home / X', ("It looks like you're doomscrolling.", 'Would you like help going outside?')),
+    (r'(?i)suno', ("It looks like you're writing a song.", 'Would you like a key change up a whole step?')),
+    (r'(?i)youtube', ("It looks like you're watching a video.", 'Haiku Theater 3000 is right here, you know.')),
+    (r'^[\u2733\u25d0\u25d1\u25d2\u25d3]|claude', ("It looks like you're talking to Claude.", 'Would you like help talking to Claude?')),
+    (r'(?i)\.md\b|xed|text editor', ("It looks like you're writing.", 'Would you like a haiku? (5-7-5 not included)')),
+    (r'(?i)downloads|nemo|files', ("It looks like you're looking for a file.", 'Have you tried the Recycle Bin?')),
+    (r'.', ("It looks like you're working.", 'Would you like help? (Please say no.)')),
+]
+
+
 class Theater:
     """Movie night: the pets' own window, playing our films on mute (after MST3K, they sit in a row in front of it)"""
 
@@ -628,6 +780,9 @@ class App:
         self.planes, self.seen_sends = [], None                                    # paper airplanes
         self.snow = None                                                           # petal snow
         self.game, self.lems, self.lemov = None, [], None                          # lemmings
+        self.cascades, self.busy_since = [], {}                                    # solitaire wins
+        self.flyers, self.idle_s, self.saver_after = [], 0.0, a.saver * 60         # flying haikus
+        self.kaiju, self.last_clippy = None, time.time()
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -661,13 +816,30 @@ class App:
             W = world.Surfaces()
         except Exception as e:
             print('ohaiku: no recess (python-xlib?):', e, file=sys.stderr); self.world_ok = False; return
+        try:
+            from Xlib.ext import screensaver as _ss
+            W.d.screensaver_query_info(W.root)
+            idle = lambda: W.d.screensaver_query_info(W.root).idle / 1000
+        except Exception:
+            idle = lambda: 0.0
+        last_idle = 0
         while True:
+            if time.time() - last_idle > 1:
+                last_idle = time.time()
+                try: GLib.idle_add(self.set_idle, idle())
+                except Exception: pass
             if (self.mode in ('recess', 'bloomcore', 'lemmings') or self.snow) and not self.hidden:
                 try: GLib.idle_add(self.set_surfaces, W.poll())
                 except Exception as e: print('ohaiku: world:', e, file=sys.stderr)
                 time.sleep(.12)
             else:
                 time.sleep(.5)
+
+    def set_idle(self, v):
+        was, self.idle_s = self.idle_s, v
+        if self.saver_after > 0 and v > self.saver_after and not self.flyers and not self.hidden and not self.locked: self.flying(True)
+        elif self.flyers and v < was and v < 2: self.flying(False)       # you're back: they scatter
+        return False
 
     def set_surfaces(self, s):
         self.surfaces = s; return False
@@ -682,6 +854,9 @@ class App:
 
     def set_locked(self, v):
         self.locked = v
+        if v:
+            for f in self.flyers: f.win.destroy()
+            self.flyers = []
         if self.snow: (self.snow.win.hide() if v else (not self.hidden and self.snow.win.show_all()))
         for c in self.everyone():
             if v: c.win.hide()
@@ -732,6 +907,16 @@ class App:
             if k not in ids: c.leave()
         self.layout()
         self.mail(res)
+        now = time.time()
+        for a in res:                                     # a long stretch of work just finished: Solitaire's win
+            busy = a.state in ('think', 'tool')
+            if busy: self.busy_since.setdefault(a.id, now)
+            elif a.id in self.busy_since:
+                started = self.busy_since.pop(a.id)
+                c = self.agents.get(a.id)
+                if a.state in ('done', 'free') and now - started >= CASCADE_MIN and c and not self.hidden and not self.locked \
+                        and self.studying is None and not self.cascades:
+                    self.cascades.append(Cascade(self, c))
         for c in new: c.x = c.slot; c.place()            # bloom where they'll stand
         return False
 
@@ -789,6 +974,19 @@ class App:
         self.balloons = [b for b in self.balloons if b.tick(dt)]
         self.flowers = [f for f in self.flowers if f.tick(dt)]
         self.planes = [p for p in self.planes if p.tick(dt)]
+        self.cascades = [k for k in self.cascades if k.tick(dt)]
+        if self.flyers:
+            if getattr(self, 'fly_from', None) is None: self.fly_from = (cx, cy)
+            elif abs(cx - self.fly_from[0]) + abs(cy - self.fly_from[1]) > 40 and not self.flyers[0].leaving:
+                self.flying(False)                        # the pointer moved: you're back, they scatter
+            scr = Gdk.Screen.get_default()
+            self.flyers = [f for f in self.flyers if f.tick(dt, scr.get_width(), scr.get_height())]
+        if self.kaiju:
+            if not self.kaiju.tick(dt): self.kaiju = None
+        if self.mode in ('recess', 'bloomcore', 'tag', 'follow') and time.time() - self.last_clippy > 900 and random.random() < dt / 600:
+            self.clippy()
+        if self.mode in ('recess', 'bloomcore') and not self.kaiju and random.random() < dt / 3600:
+            self.stomp()
         if self.snow and not self.hidden and self.tk % 2 == 0:
             self.snow.tick(2 * dt, self.surfaces, self.floor(), self.order())
         if self.theater and not self.hidden: self.audience_tick(dt)
@@ -805,7 +1003,7 @@ class App:
                 if self.mode in ('perch', 'lemmings') and c.y < fl - 6 and c.state != 'spawn':     # up on a window: jump down home
                     self.leap(c, c.slot, fl, None)
                 else: c.step(dt, tx, ty)
-            near = self.mode not in ('follow',) and abs(cx - c.x) < c.cpx * .45 + 30 and c.y - c.foot - 30 < cy < c.y + 40
+            near = (self.kaiju is not None and abs(self.kaiju.x - c.x) < 500) or self.mode not in ('follow',) and abs(cx - c.x) < c.cpx * .45 + 30 and c.y - c.foot - 30 < cy < c.y + 40
             c.duck += (float(near) - c.duck) * min(1, 8 / HZ)
             if c.duck < .01: c.duck = 0
             c.tick_draw()
@@ -1003,6 +1201,37 @@ class App:
         if not on and self.mode not in ('recess', 'bloomcore'): self.surfaces = []
         return False
 
+    def flying(self, on):
+        if on:
+            scr = Gdk.Screen.get_default(); W, H = scr.get_width(), scr.get_height()
+            for i in range(14):
+                sc = random.choice((.55, .7, .85, 1.0))
+                self.flyers.append(Flyer(self, 'haiku%02d' % random.randrange(12), random.uniform(W * .2, W + 300),
+                                         random.uniform(-400, H * .6), sc))
+        else:
+            for f in self.flyers: f.leaving = True
+        self.fly_from = None
+
+    def stomp(self):
+        if self.kaiju or not os.path.isdir(os.path.join(SHARE, 'kaiju')): return
+        self.kaiju = Kaiju(self, random.choice(('opus0', 'opus3')))
+        hiders = self.order()
+        if hiders: self.balloon(random.choice(hiders), 'KAIJU!', '', 2.0)
+
+    def clippy(self):
+        self.last_clippy = time.time()
+        try:
+            out = subprocess.run(['xprop', '-root', '_NET_ACTIVE_WINDOW'], capture_output=True, text=True, timeout=1).stdout
+            wid = out.strip().split()[-1]
+            title = subprocess.run(['xprop', '-id', wid, '_NET_WM_NAME'], capture_output=True, text=True, timeout=1).stdout
+            title = title.split('=', 1)[1].strip().strip('"') if '=' in title else ''
+        except (OSError, subprocess.SubprocessError, IndexError):
+            title = ''
+        import re
+        head, body = next(b for pat, b in CLIPPY if re.search(pat, title or 'x'))
+        speakers = [c for c in self.order() if c.state not in ('spawn', 'sleep') and not c.arc and not c.falling]
+        if speakers: self.balloon(random.choice(speakers), head, body, 6.0)
+
     def mail(self, res):
         """new SendMessage calls become paper airplanes (the first scan only remembers what was already sent)"""
         first = self.seen_sends is None
@@ -1140,7 +1369,7 @@ class App:
             c.arc['t'] = -i * .12                         # one after another
         self.layout()
         if not self.quiet:
-            try: subprocess.Popen(['paplay', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
+            try: subprocess.Popen(['paplay', '--volume=26000', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
             except OSError: pass
 
     def air(self, c, dt):
@@ -1233,6 +1462,9 @@ class App:
                 if self.theater: self.theater.win.destroy(); self.theater = None
                 self.toggle_snow(False)
                 self.lemmings_end()
+                for f in self.flyers: f.win.destroy()
+                self.flyers = []
+                if self.kaiju: self.kaiju.win.destroy(); self.kaiju = None
                 self.pets, self.party, self.flowers, self.audience = [], [], [], []
                 fl = self.floor()
                 for c in self.agents.values():
@@ -1292,6 +1524,8 @@ class App:
         if self.game: item('Oh No! (nuke the lemmings)', self.oh_no)
         item('Movie Night', self.movie)
         item('Petal Snow', self.toggle_snow)
+        item('Flying Haikus', lambda: self.flying(not self.flyers))
+        item('Kaiju', self.stomp)
         item('Nothing! Studying!', self.study)
         item('Load Up Haiku', self.add_pet)
         m.append(Gtk.SeparatorMenuItem())
@@ -1324,7 +1558,7 @@ class App:
         nm = 'Opus 5.5' if who.startswith('opus') else 'Haiku 5.5'
         self.balloon(c, 'Found New Hardware', '%s\nYour new %s is installed and ready to use.' % (nm, nm.split()[0]), 4.5)
         if not self.quiet:
-            try: subprocess.Popen(['paplay', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
+            try: subprocess.Popen(['paplay', '--volume=26000', os.path.join(HERE, 'ding.wav')], stderr=subprocess.DEVNULL)
             except OSError: pass
         return False
 
@@ -1336,6 +1570,9 @@ class App:
             if self.theater: self.theater.win.hide()
             if self.snow: self.snow.win.hide()
             if self.lemov: self.lemov.win.hide()
+            for f in self.flyers: f.win.destroy()
+            self.flyers = []
+            if self.kaiju: self.kaiju.win.destroy(); self.kaiju = None
         elif m == 'show':
             self.hidden = False
             for c in self.everyone(): c.win.show_all()
@@ -1379,6 +1616,12 @@ class App:
             elif c == 'movie': self.movie()
             elif c == 'snow': self.toggle_snow()
             elif c == 'ohno': self.oh_no()
+            elif c == 'fly': self.flying(not self.flyers)
+            elif c == 'kaiju': self.stomp()
+            elif c == 'clippy': self.clippy()
+            elif c == 'cascade':                          # (for testing: a pretend long finish)
+                cs = [x for x in self.agents.values() if not x.gone]
+                if cs: self.cascades.append(Cascade(self, random.choice(cs)))
 
     # -- the tray icon, after Plus! Dancer's -------------------------------------------------------------
     def tray(self):
@@ -1405,6 +1648,8 @@ class App:
         item('Oh No! (nuke the lemmings)', self.oh_no)
         item('Movie Night', self.movie)
         item('Petal Snow', self.toggle_snow)
+        item('Flying Haikus', lambda: self.flying(not self.flyers))
+        item('Kaiju', self.stomp)
         item('Nothing! Studying!  (or shake the mouse)', self.study)
         m.append(Gtk.SeparatorMenuItem())
         ck = Gtk.CheckMenuItem(label='Dance Only When Music Plays'); ck.set_active(True)
@@ -1438,14 +1683,15 @@ def main():
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
-    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow'): p.add_argument('--' + m, action='store_true')
+    for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade'): p.add_argument('--' + m, action='store_true')
+    p.add_argument('--saver', type=float, default=5, help='minutes idle before the Flying Haikus (0: never)')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
     p.add_argument('--quit', action='store_true', help='send them home')
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
     a = p.parse_args()
-    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow') if getattr(a, m)]
+    modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade') if getattr(a, m)]
     pid = running_pid()
     if a.quit or a.restart:
         if pid:
@@ -1474,7 +1720,8 @@ def main():
     import cairo
     sys.path.insert(0, HERE)
     app = App(a)
-    for m in modes: app.study() if m == 'studying' else app.movie() if m == 'movie' else app.toggle_snow() if m == 'snow' else app.oh_no() if m == 'ohno' else app.set_mode(m)
+    for m in modes: app.study() if m == 'studying' else app.movie() if m == 'movie' else app.toggle_snow() if m == 'snow' else app.oh_no() if m == 'ohno' else \
+        app.flying(True) if m == 'fly' else app.stomp() if m == 'kaiju' else app.clippy() if m == 'clippy' else app.set_mode(m)
     Gtk.main()
 
 

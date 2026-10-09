@@ -76,6 +76,20 @@ kick it up. (About 10% of a CPU core while it's on.)
 recipient's, who looks up with a "!". Recipients are found by session name, by subagent id, or by the messaging socket's
 pid (via `~/.claude/sessions/<pid>.json`); planes to anyone not on screen fly off the top.
 
+**Flying Haikus** (After Dark's Flying Toasters): after five idle minutes (`--saver N`, 0 for never) a squadron of
+Haikus with petal wings glides down and to the left across the screen; move the mouse and they scatter. `--fly` or the
+menu to call them up.
+
+**Solitaire win**: when an agent finishes a stretch of work longer than eight minutes, its chibi bounces off across the
+screen leaving a copy of itself every frame, like Windows Solitaire's win cascade; then the trail fades and it's back.
+
+**Kaiju**: chibi Opus at five times the size stomps along the bottom of the screen and everyone ducks below the edge.
+`--kaiju`, the menu, or, very rarely, by itself during Recess and Bloomcore.
+
+**Clippy, but it's a Haiku**: now and then during play (at most every fifteen minutes) a Haiku looks at your active
+window's title and offers help: doomscrolling, writing a song, talking to Claude, looking for a file ("Have you tried the
+Recycle Bin?")... `--clippy` to ask now.
+
 **Movie night** (after MST3K's silhouette row): `--movie` or the menu. The pets open their own window, *Haiku Theater
 3000*, put on one of our films on mute (*Load Up Haiku*, *Load Up Opus*; `./make_tv.sh` extracts them from the bc1/bc2
 renders), and three of them hop into a row of velvet cinema seats along its bottom edge, seen from behind with headphones
