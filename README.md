@@ -184,6 +184,9 @@ technique, a striking bit of art or writing). It remembers the last few looks, s
 - **Inspo**: if you keep a `~/claude-inspo` folder (a scrapbook your Claudes share), the recap's *Worth keeping* list
   (each with its source) and the three wishes they want most (Haiku picks them from the evening's candidates) also go to
   `~/claude-inspo/peanut-gallery/` (`<date>.md`, `wishlist.md`). Nothing is fetched by itself: the wishlist waits for you, or a Claude you ask.
+- **Characters**: the first time a name joins the cast, Haiku invents who they are (what they love to watch, how they
+  react, a quirk), and they keep it: the cards live in `~/.config/ohaiku/cast.json`, so edit any you'd like different.
+  They're gremlins, not a help desk: they tease your taste, bicker, get bored, and sulk for a line if you skip their pick.
 - **Its own head**: the gallery's Haiku runs with `--setting-sources ''`, so it doesn't load your CLAUDE.md or
   settings, only its own prompt. It calls you by your first name (from your account; `OHAIKU_NAME` to change it).
 - **Where it goes**: each look is a request to Anthropic's API through your Claude Code login, under your account's

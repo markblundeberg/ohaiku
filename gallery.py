@@ -52,7 +52,8 @@ Reply with ONE JSON object and nothing else:
  "note": null,
  "want": null}
 
-- riffs: 0 to 2. Funny, warm, quick; MST3K energy; each voice a little different. If nothing new happened since the \
+- riffs: 0 to 2. Funny, quick, MST3K energy. Each of the cast has a character card (below): play them true to it, their \
+tastes, their opinions, their quirks, so they sound like different people and sometimes disagree. If nothing new happened since the \
 last look, return no riffs: silence is fine, and never repeat an earlier line.
 - note: usually null, a few per evening at most. When something on screen is genuinely worth keeping (an idea it \
 sparks, a technique, a striking piece of art or writing, a good joke, a thing to try), a short line saying what and \
@@ -80,7 +81,10 @@ keep asking for something already asked for.
 unless the post itself says otherwise.
 - Black boxes are private windows, hidden on purpose: ignore them, never guess what's in them.
 - Never read out or note personal details (names of private people, emails, phone numbers, addresses, money, \
-passwords, private messages). Riff on the gist, not the particulars. Be kind about {HOST}; {HOST} is the host.
+passwords, private messages). Riff on the gist, not the particulars.
+- You're gremlins, not a customer-service desk: tease {HOST}'s taste, have strong opinions, be openly bored, bicker \
+with each other. If {HOST} skips your pick, you can be miffed for a line; then it's back to the show, with no grudges \
+and no real anger.
 - React to the content, like an audience: don't narrate {HOST}'s browser (tabs, timestamps, how far into a video they are).
 - The little seated figures and speech bubbles along the bottom are you and your earlier lines.""".replace('{HOST}', HOST)
 
@@ -181,12 +185,41 @@ def _claude(content, system, timeout=90):
     raise RuntimeError((p.stderr or 'no result')[-300:])
 
 
+CASTF = os.path.expanduser('~/.config/ohaiku/cast.json')
+
+
+def characters(cast):
+    """each cast member's character card: invented by Haiku the first time a name joins the cast, then kept (and
+    editable) in ~/.config/ohaiku/cast.json, so they're the same people every show. cast: [(name, model)] -> {name: card}"""
+    try: cards = json.load(open(CASTF))
+    except (OSError, ValueError): cards = {}
+    new = [(n, m) for n, m in cast if not cards.get(n)]
+    if new:
+        try:
+            out = _claude([{'type': 'text', 'text':
+                'New members are joining the Peanut Gallery, a row of chibi Claudes who watch %s\'s screen and heckle it, '
+                'MST3K-style. Invent each one\'s character from their name alone: what they love to watch, how they react, '
+                'one quirk. Make them distinct from each other and from the ones already here. One or two short sentences '
+                'each, written as a description (no "I").\n\nAlready here:\n%s\n\nNew:\n%s\n\nReply with only a JSON '
+                'object, {"name": "card"}.' % (HOST, '\n'.join('- %s: %s' % kv for kv in cards.items()) or '(nobody yet)',
+                                             '\n'.join('- %s (%s)' % nm for nm in new))}],
+                'You write character cards for a cast of tiny desktop gremlins. Be specific and playful.')
+            got = json.loads(re.search(r'\{.*\}', out, re.S).group(0))
+            for n, _ in new:
+                if isinstance(got.get(n), str) and got[n].strip(): cards[n] = got[n].strip()[:240]
+            os.makedirs(os.path.dirname(CASTF), exist_ok=True)
+            json.dump(cards, open(CASTF, 'w'), indent=1, ensure_ascii=False)
+        except Exception: pass                          # no cards this time: they just play it by ear
+    return {n: cards.get(n, '') for n, _ in cast}
+
+
 def look(imgs, cast, history, same_for=0):
     """ask Haiku about one look (the whole screen, and maybe the window in front, sharper). cast: [(name, what they
     are)]; history: recent lines. -> dict"""
     import base64
-    text = 'Cast (use these names exactly): %s\n\nEarlier tonight (oldest first):\n%s\n\n%sHere is the screen now%s.' % (
-        '; '.join('%s (%s)' % c for c in cast), '\n'.join(history[-10:]) or '(nothing yet: the lights just went down)',
+    cards = characters(cast)
+    text = 'Cast (use these names exactly):\n%s\n\nEarlier tonight (oldest first):\n%s\n\n%sHere is the screen now%s.' % (
+        '\n'.join('- %s (%s)%s' % (n, m, ': ' + cards[n] if cards.get(n) else '') for n, m in cast), '\n'.join(history[-10:]) or '(nothing yet: the lights just went down)',
         'The same thing has been up for about %d minutes.\n\n' % same_for if same_for >= 3 else '',
         ', then the window %s is looking at' % HOST if len(imgs) > 1 else '')
     out = _claude([{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': base64.b64encode(j).decode()}} for j in imgs]
