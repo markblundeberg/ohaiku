@@ -1592,6 +1592,7 @@ class App:
 
     def drop_pick(self):
         """the gallery's standing request goes when the screen changes (or the gallery stops)"""
+        self.pick_gen = getattr(self, 'pick_gen', 0) + 1           # (and one still on its way is called off)
         self.speeches = [b for b in self.speeches if not (b.pick and (b.win.destroy() or True))]
 
     # -- the Peanut Gallery: they watch your screen, and Haiku does the voices ------------------------------
@@ -1659,12 +1660,20 @@ class App:
         last_thumb, last_sent, hist, wait = None, 0.0, self.gal_hist, GAL_EVERY
         wants, log = [], []
         showing, since = None, time.time()          # what's in front (window and title), and since when
+        pick_on = None                              # what was in front when they asked for something
         live = lambda: self.gallery_on and self.gal_gen == gen
         while live():
             time.sleep(1)
             why = ('hidden' if self.hidden else 'screen locked' if self.locked else 'studying' if self.studying is not None
                    else 'nobody free to watch' if not self.gal_cast else None)
             if why: self.gal_why = why; continue
+            if pick_on is not None:                 # their request goes the moment the page changes, and they look again soon
+                try:
+                    act = S.active(); now_on = next(((w[0], w[6]) for w in S.windows() if w[0] == act), None)
+                except Exception: now_on = pick_on
+                if now_on != pick_on:
+                    pick_on = None; GLib.idle_add(lambda: (self.drop_pick(), False)[1])
+                    last_sent = min(last_sent, time.time() - wait + 3)
             if time.time() - last_sent < wait: continue
             try:
                 wins, act = S.windows(), S.active()
@@ -1685,6 +1694,7 @@ class App:
                 print('ohaiku: gallery:', e, file=sys.stderr); wait = 60
                 self.gal_why = 'Haiku call failed: %s' % str(e)[:80]; continue
             if not live(): break
+            pick_on = showing if res.get('pick') else None
             self.gal_why, self.gal_looks = 'watching (last look %s)' % time.strftime('%H:%M:%S'), getattr(self, 'gal_looks', 0) + 1
             hist.append('%s seen: %s' % (time.strftime('%H:%M'), res['seen']) + ''.join(' | %s: "%s"' % (r['who'], r['line']) for r in res['riffs'])
                         + (' | noted: %s' % res['note'] if res['note'] else '') + (' | wished for: %s' % res['want']['what'] if res['want'] else '')
@@ -1725,7 +1735,8 @@ class App:
             GLib.timeout_add(t, self.riff, c, 'whisper', 'noted: ' + clip(res['note'], 84)); t += 2800
         if res.get('pick') and cast:                 # their request: stays up until the screen changes
             c = cast.get(res['pick']['who']) or random.choice(list(cast.values()))
-            GLib.timeout_add(t, self.riff, c, 'cheer', res['pick']['line'], True)
+            g = getattr(self, 'pick_gen', 0)
+            GLib.timeout_add(t, lambda: self.riff(c, 'cheer', res['pick']['line'], True) if getattr(self, 'pick_gen', 0) == g else False)
         return False
 
     def riff(self, c, pose, line, pick=False):
