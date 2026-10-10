@@ -60,7 +60,7 @@ what it's doing:
 | hit a usage limit | a tea break, until the limit resets (*tea break: back at 5:30pm*; lavender plate) |
 | an API error ended the turn (529, 500, connection lost) | dizzy, with stars, for ten minutes (*oof: 529 overloaded*; pink plate) |
 | just finished | a happy bounce (green plate) |
-| waiting for you | free: wanders, shimmies, :3, dances when music is playing |
+| waiting for you | free: wanders, shimmies, flosses, :3, dances when music is playing |
 | quiet for 20 minutes | lies down and sleeps with a nose bubble |
 | gone for 2 hours | folds back into its flower |
 

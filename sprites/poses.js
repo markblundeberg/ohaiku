@@ -60,6 +60,7 @@ function ohStates(who) {
   for (const [k, facing] of [['runR', 1], ['runL', -1], ['runF', 0]])
     S[k] = { fps: 12, loop: true, n: 8, f: (g, i) => H(g, { t: i / 12, move: 'march', facing, beat: i * .25, expr: 'grin' }) };
   S.dance = { fps: 13.33, loop: true, n: 32, f: (g, i) => H(g, { t: i / 13.33, move: 'shimmy', beat: i * .125, expr: 'cat' }) };
+  S.floss = { fps: 13.33, loop: true, n: 32, f: (g, i) => H(g, { t: i / 13.33, move: 'floss', beat: i * .125, expr: 'grin' }) };
   S.yawn = { fps: 12, loop: false, n: 18, f: (g, i) => H(g, { t: i / 12, move: 'freeze', freeze: 1, beat: 0, expr: 'neutral', eyes: 'closed', mouth: i < 14 ? 'o' : 'cat' }) };
   S.sleep = { fps: 12, loop: true, n: 36, f: (g, i) => {
     const t = i / 12, br = .5 - .5 * Math.cos(i / 36 * Math.PI * 4);       // two breaths per loop

@@ -452,6 +452,16 @@ function _hkMove(P, V, b, t) {
       M.feet = [[-16 + (side < 0 ? 0 : 3), -10, 0], [16 + (side > 0 ? 0 : -3), -10 - (side > 0 ? 0 : 3) * pop, 0]];
       break;
     }
+    case 'floss': {
+      // the floss: straight arms swing together from side to side, one passing in front of the body and one behind
+      // (they swap every swing), and the hips swing the other way. One swing there and back per beat
+      const w = Math.sin(2 * Math.PI * u), X = 50 * w, z = 56 * Math.cos(2 * Math.PI * u);   // |z| > ~37: drawn behind
+      M.arms = [[-X - 16, 54, z], [X - 16, 54, -z]];
+      M.sway = -.5 * X; M.tilt = .0022 * X; M.headTilt = -.0016 * X; M.headDx = .06 * X;
+      M.sy = 1 + .015 * Math.abs(w);
+      M.feet = [[-20, -10, 0], [20, -10, 0]];
+      break;
+    }
     case 'armpump': {
       const which = Math.floor(b / 4) % 2, up = _hkKey(u, [[0, 1], [.15, 1.05], [.45, .9], [.75, 0], [1, .6]]);
       const pump = _hkLerpA([30, 2, 16], [54, -56, 2], up);
