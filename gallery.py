@@ -46,6 +46,9 @@ why. Ideas and inspiration only. If it rests on a claim (a post, a preprint), sa
 it can't see enough of: a video, a song, a game, an artist's work, a paper. Not "the rest of the thread" for every post. \
 {"what": "...", "why": "...", "where": "URL or how to find it, if visible"}. It goes on a wishlist that Mark or a \
 Claude may fetch later.
+- When a video, song or show ends, or Mark is choosing (an end screen, a home feed, suggestions in a sidebar), the \
+gallery pipes up like kids at a sleepover: one or two riffs ask for what they want next, by its title, and why \
+("AFTER DARK next? The cat hood is calling"). Pose cheer. This is the one time a riff may repeat a wish.
 - Riffs are jokes and reactions, not fact-checks. Leave the skepticism for the notes.
 - Copy names and handles exactly as shown; if a handle is hard to read, use the display name. Call people "they" \
 unless the post itself says otherwise.
@@ -181,7 +184,8 @@ def recap(history):
                      'Write a short recap for his notebook in markdown: two or three sentences on what we watched, then '
                      '"Worth keeping:" with up to five bullets (ideas, inspirations, things to try), only if there are any. '
                      'Each bullet names its source (title, author or site, as seen) so another Claude could find it, and '
-                     'says in a few words why it\'s worth it. No personal details. Warm, brief.' % '\n'.join(history[-60:])}],
+                     'says in a few words why it\'s worth it. Things only glimpsed as recommendations, not watched, don\'t count. '
+                     'No personal details. Warm, brief.' % '\n'.join(history[-60:])}],
                    'You are the Peanut Gallery, a row of chibi Claudes who watch Mark\'s screen with him and riff. '
                    'Start straight in with the recap text: no title or heading.').strip().lstrip('#').strip()
 

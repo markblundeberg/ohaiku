@@ -1696,9 +1696,13 @@ class App:
         for i, r in enumerate(res['riffs']):
             c = cast.get(r['who'])
             if c: GLib.timeout_add(int(i * 2800) + 1, self.riff, c, r['pose'], r['line'])
+        t = len(res['riffs']) * 2800 + 400
+        if res['want'] and cast:                    # say the wish out loud, so Mark hears what they'd love to see
+            c = random.choice(list(cast.values()))
+            GLib.timeout_add(t, self.riff, c, 'cheer', '\u2606 can we get ' + res['want']['what'][:76] + '?'); t += 2800
         if res['note'] and cast:
             c = random.choice(list(cast.values()))
-            GLib.timeout_add(len(res['riffs']) * 2800 + 400, self.riff, c, 'whisper', '\u270e noted: ' + res['note'][:80])
+            GLib.timeout_add(t, self.riff, c, 'whisper', '\u270e noted: ' + res['note'][:80])
         return False
 
     def riff(self, c, pose, line):
