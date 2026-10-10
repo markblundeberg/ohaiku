@@ -48,6 +48,7 @@ Reply with ONE JSON object and nothing else:
 (public posts and pages only), name the video, site or author when visible",
  "riffs": [{"who": "<a cast name>", "line": "<a quip, gasp or reaction, at most 70 characters>", \
 "pose": "giggle|gasp|cheer|whisper|munch|watch"}],
+ "pick": null,
  "note": null,
  "want": null}
 
@@ -60,9 +61,11 @@ why. Ideas and inspiration only. If it rests on a claim (a post, a preprint), sa
 it can't see enough of: a video, a song, a game, an artist's work, a paper. Not "the rest of the thread" for every post. \
 {"what": "...", "why": "...", "where": "URL or how to find it, if visible"}. It goes on a wishlist that {HOST} or a \
 Claude may fetch later.
-- When a video, song or show ends, or {HOST} is choosing (an end screen, a home feed, suggestions in a sidebar), the \
-gallery pipes up like kids at a sleepover: one or two riffs ask for what they want next, by its title, and why \
-("AFTER DARK next? The cat hood is calling"). Pose cheer. This is the one time a riff may repeat a wish.
+- pick: whenever the screen is a menu of things to watch or read (a home page, search results, an end screen, a \
+sidebar of suggestions, a feed {HOST} is choosing from), pick is REQUIRED: the gallery chooses, like kids at a \
+sleepover. {"who": "<a cast name>", "title": "<its title, exactly as shown>", "line": "<asking {HOST} for it, at most \
+70 characters, with the reason>"}, e.g. {"who": "ember", "title": "AFTER DARK", "line": "AFTER DARK next? The cat \
+hood is calling!"}. Pick from what's on screen. Otherwise null. Their bubble stays up until the screen changes.
 - You can't hear anything, and you only get a still every few seconds. If the same thing has been up a while and \
 isn't giving you anything (a talking head you can't hear, one picture for a whole mix, a show whose jokes are all in \
 the sound), say so honestly instead of faking it: a riff that you're getting bored, and what you'd rather watch, by \
@@ -190,10 +193,15 @@ def look(imgs, cast, history, same_for=0):
     for r in riffs:
         r['line'] = str(r['line']).strip()[:90]
         if r.get('pose') not in POSES: r['pose'] = 'giggle'
+    pick = d.get('pick') if isinstance(d.get('pick'), dict) and str(d['pick'].get('line') or '').strip() else None
+    if pick:
+        pick = {k: str(pick.get(k) or '').strip() for k in ('who', 'title', 'line')}
+        pick['line'] = pick['line'][:90]
+        if pick['who'] not in names: pick['who'] = None          # the app hands it to someone in the row
     note, want = d.get('note'), d.get('want')
     want = {k: str(want.get(k) or '').strip()[:300] for k in ('what', 'why', 'where')} if isinstance(want, dict) and want.get('what') else None
     return {'seen': str(d.get('seen') or '').strip()[:120], 'detail': str(d.get('detail') or '').strip()[:900], 'riffs': riffs,
-            'note': str(note).strip()[:300] if note else None, 'want': want}
+            'note': str(note).strip()[:300] if note else None, 'want': want, 'pick': pick}
 
 
 def recap(history):

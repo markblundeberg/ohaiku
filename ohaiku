@@ -953,8 +953,8 @@ class Balloon:
 class Speech:
     """a comic speech bubble over a chibi: a quip from the Peanut Gallery, or an agent saying what it needs"""
 
-    def __init__(self, app, who, text, life=5.0):
-        self.app, self.who, self.t, self.life = app, who, 0.0, life
+    def __init__(self, app, who, text, life=5.0, pick=False):
+        self.app, self.who, self.t, self.life, self.pick = app, who, 0.0, life, pick
         words, lines = text.split(), ['']
         for w_ in words:
             if lines[-1] and len(lines[-1]) + 1 + len(w_) > 30: lines.append(w_)
@@ -999,7 +999,8 @@ class Speech:
         cr.new_path(); cr.arc(1 + r, 1 + r, r, math.pi, 1.5 * math.pi); cr.arc(W - r, 1 + r, r, 1.5 * math.pi, 0)
         cr.arc(W - r, H - r, r, 0, .5 * math.pi); cr.line_to(tx + 8, H); cr.line_to(tx - 2, H + 12); cr.line_to(tx - 6, H)
         cr.arc(1 + r, H - r, r, .5 * math.pi, math.pi); cr.close_path()
-        cr.set_source_rgba(1, .98, .95, .97); cr.fill_preserve(); cr.set_source_rgba(.29, .17, .11, .9); cr.set_line_width(2); cr.stroke()
+        cr.set_source_rgba(*((1, .93, .62, .98) if self.pick else (1, .98, .95, .97))); cr.fill_preserve()
+        cr.set_source_rgba(.29, .17, .11, .9); cr.set_line_width(2.6 if self.pick else 2); cr.stroke()
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12.5)
         cr.set_source_rgb(.29, .17, .11)
         for i, l in enumerate(self.lines):
@@ -1585,9 +1586,13 @@ class App:
             c.duck = 0
             c.tick_draw()
 
-    def speak(self, c, text, life=5.0):
+    def speak(self, c, text, life=5.0, pick=False):
         self.speeches = [b for b in self.speeches if not (b.who is c and (b.win.destroy() or True))]
-        self.speeches.append(Speech(self, c, text, life))
+        self.speeches.append(Speech(self, c, text, life, pick))
+
+    def drop_pick(self):
+        """the gallery's standing request goes when the screen changes (or the gallery stops)"""
+        self.speeches = [b for b in self.speeches if not (b.pick and (b.win.destroy() or True))]
 
     # -- the Peanut Gallery: they watch your screen, and Haiku does the voices ------------------------------
     def gallery_seats(self):
@@ -1628,6 +1633,7 @@ class App:
             threading.Thread(target=self.gallery_loop, args=(self.gal_gen,), daemon=True).start()
         else:
             if self.placard: self.placard.win.destroy(); self.placard = None
+            self.drop_pick()
             for c in self.everyone():
                 if c.state.startswith('g'): c.set('alert')
         if getattr(self, 'gal_item', None) and self.gal_item.get_active() != on:
@@ -1681,7 +1687,8 @@ class App:
             if not live(): break
             self.gal_why, self.gal_looks = 'watching (last look %s)' % time.strftime('%H:%M:%S'), getattr(self, 'gal_looks', 0) + 1
             hist.append('%s seen: %s' % (time.strftime('%H:%M'), res['seen']) + ''.join(' | %s: "%s"' % (r['who'], r['line']) for r in res['riffs'])
-                        + (' | noted: %s' % res['note'] if res['note'] else '') + (' | wished for: %s' % res['want']['what'] if res['want'] else ''))
+                        + (' | noted: %s' % res['note'] if res['note'] else '') + (' | wished for: %s' % res['want']['what'] if res['want'] else '')
+                        + (' | asked to watch: %s' % res['pick']['title'] if res.get('pick') else ''))
             if res['want']: wants.append(res['want'])
             log.append(hist[-1] + (' | detail: %s' % res['detail'] if res['detail'] else ''))
             try:
@@ -1690,6 +1697,7 @@ class App:
                     shot = '\n\n![](%s)' % gallery.keep(imgs[-1])
                 gallery.write('**%s** %s' % (time.strftime('%H:%M'), res['seen']) + ('\n\n%s' % res['detail'] if res['detail'] else '')
                               + ''.join('\n> **%s:** %s' % (r['who'], r['line']) for r in res['riffs'])
+                              + ('\n\n\u25b6 **%s** asks for *%s*: %s' % (res['pick']['who'] or 'someone', res['pick']['title'], res['pick']['line']) if res.get('pick') else '')
                               + ('\n\n\u270e %s' % res['note'] if res['note'] else '')
                               + ('\n\n\u2606 wish: %s (%s)%s' % (res['want']['what'], res['want']['why'], ' \u2014 ' + res['want']['where'] if res['want']['where'] else '') if res['want'] else '')
                               + shot)
@@ -1703,6 +1711,7 @@ class App:
             except Exception as e: print('ohaiku: gallery recap:', e, file=sys.stderr)
 
     def gallery_result(self, res):
+        self.drop_pick()
         cast = self.cast_map()
         for i, r in enumerate(res['riffs']):
             c = cast.get(r['who'])
@@ -1713,17 +1722,20 @@ class App:
             GLib.timeout_add(t, self.riff, c, 'cheer', 'can we get ' + clip(res['want']['what'], 80) + '?'); t += 2800
         if res['note'] and cast:
             c = random.choice(list(cast.values()))
-            GLib.timeout_add(t, self.riff, c, 'whisper', 'noted: ' + clip(res['note'], 84))
+            GLib.timeout_add(t, self.riff, c, 'whisper', 'noted: ' + clip(res['note'], 84)); t += 2800
+        if res.get('pick') and cast:                 # their request: stays up until the screen changes
+            c = cast.get(res['pick']['who']) or random.choice(list(cast.values()))
+            GLib.timeout_add(t, self.riff, c, 'cheer', res['pick']['line'], True)
         return False
 
-    def riff(self, c, pose, line):
-        if c.gone or self.hidden or self.locked: return False
+    def riff(self, c, pose, line, pick=False):
+        if c.gone or self.hidden or self.locked or (pick and not self.gallery_on): return False
         life = 3.2 + len(line) / 16
         if c in self.audience:
             c.set({'gasp': 'giggle', 'cheer': 'giggle'}.get(pose, pose)); c.next_fidget = time.time() + life
         else:
             c.react = (pose, time.time() + min(life, 4.5))
-        self.speak(c, line, life)
+        self.speak(c, line, float('inf') if pick else life, pick)
         return False
 
     def balloon(self, c, title, body='', life=4.0):
