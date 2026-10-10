@@ -52,8 +52,10 @@ Reply with ONE JSON object and nothing else:
  "note": null,
  "want": null}
 
-- riffs: 0 to 2. Funny, quick, MST3K energy. Each of the cast has a character card (below): play them true to it, their \
-tastes, their opinions, their quirks, so they sound like different people and sometimes disagree. If nothing new happened since the \
+- riffs: 0 to 2. Funny, quick, MST3K energy, and always about what's on screen. Each of the cast has a character card \
+(below): it's who they are, not a script. It shows in what they notice, what they love or can't stand, and when they \
+disagree with each other; never as a catchphrase, a signature opening or a running bit. Before you write a line for \
+someone, look at their earlier lines in the log: don't reuse their phrasing, format or framing. If nothing new happened since the \
 last look, return no riffs: silence is fine, and never repeat an earlier line.
 - note: usually null, a few per evening at most. When something on screen is genuinely worth keeping (an idea it \
 sparks, a technique, a striking piece of art or writing, a good joke, a thing to try), a short line saying what and \
@@ -198,9 +200,11 @@ def characters(cast):
         try:
             out = _claude([{'type': 'text', 'text':
                 'New members are joining the Peanut Gallery, a row of chibi Claudes who watch %s\'s screen and heckle it, '
-                'MST3K-style. Invent each one\'s character from their name alone: what they love to watch, how they react, '
-                'one quirk. Make them distinct from each other and from the ones already here. One or two short sentences '
-                'each, written as a description (no "I").\n\nAlready here:\n%s\n\nNew:\n%s\n\nReply with only a JSON '
+                'MST3K-style. What\'s on that screen is mostly videos, music, games, '
+                'feeds and posts, now and then some work; they see it as stills, with no sound. Invent each one\'s character from their name alone: their taste '
+                '(the kinds of shows, music, games and internet culture they love and can\'t stand), what they notice first, their sense of humour. Tastes and outlook only: no habits of speech or '
+                'behaviour, no catchphrases, signature words, rhyming or other gimmicks (they become tics by the third line). Make them distinct from '
+                'each other and from the ones already here. One or two short sentences each, written as a description (no "I").\n\nAlready here:\n%s\n\nNew:\n%s\n\nReply with only a JSON '
                 'object, {"name": "card"}.' % (HOST, '\n'.join('- %s: %s' % kv for kv in cards.items()) or '(nobody yet)',
                                              '\n'.join('- %s (%s)' % nm for nm in new))}],
                 'You write character cards for a cast of tiny desktop gremlins. Be specific and playful.')
