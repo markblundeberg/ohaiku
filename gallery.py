@@ -213,7 +213,7 @@ def characters(cast):
                 'You write character cards for a cast of tiny desktop gremlins. Be specific and playful.')
             got = json.loads(re.search(r'\{.*\}', out, re.S).group(0))
             for n, _ in new:
-                if isinstance(got.get(n), str) and got[n].strip(): cards[n] = got[n].strip()[:240]
+                if isinstance(got.get(n), str) and got[n].strip(): cards[n] = got[n].strip()[:500]
             os.makedirs(os.path.dirname(CASTF), exist_ok=True)
             json.dump(cards, open(CASTF, 'w'), indent=1, ensure_ascii=False)
         except Exception: pass                          # no cards this time: they just play it by ear
