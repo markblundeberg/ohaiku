@@ -13,16 +13,18 @@ OH = os.path.join(HERE, 'ohaiku')
 # (seconds, ohaiku command or None, your cue or None)
 STEPS = [
     (0,   'gallery',  'Peanut Gallery on. Leave the post up top and let them read it.'),
-    (26,  None,       'Scroll slowly down to the replies.'),
-    (50,  'recess',   'Recess! Grab a window and drag it around: they ride it and fall off.'),
-    (62,  'leaves',   None),
-    (70,  'fly',      None),
-    (80,  'kaiju',    None),
-    (90,  'clippy',   None),
-    (98,  'lemmings', 'Lemmings: click one to make it dig or block, if you like.'),
-    (110, 'ohno',     None),
-    (116, 'calm',     'Leaves and fliers off, back to their seats. Wrapping up.'),
-    (128, None,       None),
+    (24,  None,       'Scroll down to the first reply, and stop there.'),
+    (46,  None,       'Scroll to the next reply you like, and stop there.'),
+    (68,  'tag',      'Tag! Move your mouse around slowly: one of them is riding your pointer.'),
+    (84,  'recess',   'Recess! Drag the browser by its title bar, slowly, down and back up: they ride it and fall off.'),
+    (100, 'leaves',   None),
+    (106, 'fly',      None),
+    (114, 'kaiju',    None),
+    (124, 'clippy',   None),
+    (132, 'lemmings', 'Lemmings: click one to make it dig or block, if you like.'),
+    (142, 'ohno',     None),
+    (148, 'calm',     'Leaves and fliers off, back to their seats. Wrapping up.'),
+    (160, None,       None),
 ]
 
 
