@@ -177,8 +177,8 @@ technique, a striking bit of art or writing). It remembers the last few looks, s
   "☆ can we get …?") go to
   `~/.local/share/ohaiku/gallery/<date>.md`, with the redacted screenshot saved beside it for any look that made a note
   or a wish. When you turn the gallery off, Haiku writes a short recap with a *Worth keeping* list ("Open the Gallery
-  Notes" in the tray menu). When you're on a menu of things to watch (a home page, search results, an end screen), one of them
-  picks something, by its title, in a yellow bubble that stays up until the screen changes; and
+  Notes" in the tray menu). When you're choosing what to watch (a home page, search results, an end screen), one of them
+  picks something (while a video plays, they watch it), by its title, in a yellow bubble that stays up until the screen changes; and
   since they can't hear and only see stills, they'll say when something has stopped giving them anything (the same
   window for a while), and what they'd rather watch. Movie night's audience joins the cast, so a film in the theater gets riffed too.
 - **Inspo**: if you keep a `~/claude-inspo` folder (a scrapbook your Claudes share), the recap's *Worth keeping* list
