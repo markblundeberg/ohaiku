@@ -39,11 +39,16 @@ Reply with ONE JSON object and nothing else:
 
 - riffs: 0 to 2. Funny, warm, quick; MST3K energy; each voice a little different. If nothing new happened since the \
 last look, return no riffs: silence is fine, and never repeat an earlier line.
-- note: usually null. When something on screen is genuinely worth keeping (an idea it sparks, a technique, a striking \
-piece of art or writing, a good joke, a thing to try), a short line saying what and why. Ideas and inspiration only.
-- want: usually null. When the gallery would love to keep or see more of something (the full video, the whole \
-thread, the artist's other work), {"what": "...", "why": "...", "where": "URL or how to find it, if visible"}. \
-It goes on a wishlist that Mark or a Claude may fetch later.
+- note: usually null, a few per evening at most. When something on screen is genuinely worth keeping (an idea it \
+sparks, a technique, a striking piece of art or writing, a good joke, a thing to try), a short line saying what and \
+why. Ideas and inspiration only. If it rests on a claim (a post, a preprint), say so in a word.
+- want: almost always null, once or twice an evening at most. Only when the gallery is truly hooked on a whole thing \
+it can't see enough of: a video, a song, a game, an artist's work, a paper. Not "the rest of the thread" for every post. \
+{"what": "...", "why": "...", "where": "URL or how to find it, if visible"}. It goes on a wishlist that Mark or a \
+Claude may fetch later.
+- Riffs are jokes and reactions, not fact-checks. Leave the skepticism for the notes.
+- Copy names and handles exactly as shown; if a handle is hard to read, use the display name. Call people "they" \
+unless the post itself says otherwise.
 - Black boxes are private windows, hidden on purpose: ignore them, never guess what's in them.
 - Never read out or note personal details (names of private people, emails, phone numbers, addresses, money, \
 passwords, private messages). Riff on the gist, not the particulars. Be kind about Mark; he's the host.
@@ -134,7 +139,8 @@ def _claude(content, system, timeout=90):
     import base64
     os.makedirs(WORK, exist_ok=True)
     msg = json.dumps({'type': 'user', 'message': {'role': 'user', 'content': content}})
-    p = subprocess.run(['claude', '-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--system-prompt', system,
+    p = subprocess.run(['claude', '-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--setting-sources', '',
+                        '--system-prompt', system,
                         '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'],
                        input=msg + '\n', capture_output=True, text=True, timeout=timeout, cwd=WORK, env=_env())
     for ln in p.stdout.splitlines():
@@ -178,6 +184,20 @@ def recap(history):
                      'says in a few words why it\'s worth it. No personal details. Warm, brief.' % '\n'.join(history[-60:])}],
                    'You are the Peanut Gallery, a row of chibi Claudes who watch Mark\'s screen with him and riff. '
                    'Start straight in with the recap text: no title or heading.').strip().lstrip('#').strip()
+
+
+def pick_wishes(wants, k=3):
+    """at the end of a showing: of tonight's wish candidates, the few the gallery most wants (it tends to wish for
+    everything). -> a sublist of wants"""
+    if len(wants) <= 1: return wants
+    out = _claude([{'type': 'text', 'text': 'Tonight the gallery wished for these (numbered):\n\n%s\n\nPick at most %d that are '
+                    'most worth fetching: a whole thing (a video, song, game, artwork, paper) the gallery was truly hooked on, '
+                    'not just "the rest of a thread". Fewer is fine. Reply with only a JSON list of numbers, e.g. [2, 5].'
+                    % ('\n'.join('%d. %s (%s)' % (i + 1, w['what'], w['why']) for i, w in enumerate(wants)), k)}],
+                  'You are the Peanut Gallery, a row of chibi Claudes who watch Mark\'s screen with him. Be choosy.')
+    m = re.search(r'\[[\d,\s]*\]', out)
+    picks = json.loads(m.group(0)) if m else []
+    return [wants[i - 1] for i in dict.fromkeys(picks) if isinstance(i, int) and 1 <= i <= len(wants)][:k]
 
 
 def to_inspo(recap_text, wants):

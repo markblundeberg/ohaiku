@@ -130,13 +130,15 @@ technique, a striking bit of art or writing). It remembers the last few looks, s
 - **Eyes**: each look is the whole screen, small, plus the window you're looking at, sharper (up to 1568 px), so it can
   read the caption a joke hangs on. (If that window is a private one, it only gets the small, redacted whole.)
 - **Notes**: what they saw (a few concrete sentences, quoting headlines and captions), every quip, every note, and every
-  *wish* (something they'd love to see more of: the full video, the whole thread) go to
+  *wish* (something they'd love to see more of: the full video, the song, the artist's work) go to
   `~/.local/share/ohaiku/gallery/<date>.md`, with the redacted screenshot saved beside it for any look that made a note
   or a wish. When you turn the gallery off, Haiku writes a short recap with a *Worth keeping* list ("Open the Gallery
   Notes" in the tray menu). Movie night's audience joins the cast, so a film in the theater gets riffed too.
-- **Inspo**: the recap's *Worth keeping* list (each with its source) and the wishes also go to
-  `~/claude-inspo/peanut-gallery/` (`<date>.md`, `wishlist.md`), for the other Claudes. Nothing is fetched by itself:
-  the wishlist waits for you, or a Claude you ask.
+- **Inspo**: the recap's *Worth keeping* list (each with its source) and the three wishes they want most (Haiku picks
+  them from the evening's candidates) also go to `~/claude-inspo/peanut-gallery/` (`<date>.md`, `wishlist.md`), for
+  the other Claudes. Nothing is fetched by itself: the wishlist waits for you, or a Claude you ask.
+- **Its own head**: the gallery's Haiku runs with `--setting-sources ''`, so it doesn't load your CLAUDE.md or
+  settings, only its own prompt.
 
 **Nothing! Studying!** From any tier: shake the mouse hard left and right (or `--studying`, or the menu). Everyone spins
 into the tray icon, silently (it's for hiding them, so no sound), and three seconds later one Haiku peeks up by the

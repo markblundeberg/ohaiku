@@ -1688,7 +1688,7 @@ class App:
             try:
                 rc = gallery.recap(log)
                 gallery.write('## Recap, %s\n\n%s' % (time.strftime('%H:%M'), rc))
-                gallery.to_inspo(rc, wants)
+                gallery.to_inspo(rc, gallery.pick_wishes(wants))
             except Exception as e: print('ohaiku: gallery recap:', e, file=sys.stderr)
 
     def gallery_result(self, res):
