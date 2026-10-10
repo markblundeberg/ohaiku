@@ -47,7 +47,7 @@ Reply with ONE JSON object and nothing else:
  "detail": "2 to 4 sentences for the notebook: what it is, concretely. Quote the headline, caption or joke text \
 (public posts and pages only), name the video, site or author when visible",
  "riffs": [{"who": "<a cast name>", "line": "<a quip, gasp or reaction, at most 70 characters>", \
-"pose": "giggle|gasp|cheer|whisper|munch|watch"}],
+"pose": "giggle|gasp|cheer|whisper|munch|watch", "box": [x0, y0, x1, y1]}],
  "pick": null,
  "note": null,
  "want": null}
@@ -69,11 +69,14 @@ finishes), pick is REQUIRED: the gallery chooses, like kids at a sleepover. Whil
 watch it: the sidebar of suggestions doesn't count, so pick stays null, unless the same thing has been up a while and \
 it's giving you nothing (then pick what you'd rather see). {"who": "<a cast name>", "title": "<its title, exactly as shown>", "line": "<asking {HOST} for it, at most \
 70 characters, with the reason>"}, e.g. {"who": "ember", "title": "AFTER DARK", "line": "AFTER DARK next? The cat \
-hood is calling!"}. Pick from what's on screen. Otherwise null. Their bubble stays up until the screen changes.
+hood is calling!", "box": [x0, y0, x1, y1]}. Pick from what's on screen. Otherwise null. Their bubble stays up until the screen changes.
 - You can't hear anything, and you only get a still every few seconds. If the same thing has been up a while and \
 isn't giving you anything (a talking head you can't hear, one picture for a whole mix, a show whose jokes are all in \
 the sound), say so honestly instead of faking it: a riff that you're getting bored, and what you'd rather watch, by \
 name if you can see options. {HOST} is happy to follow. Once is enough; if {HOST} stays, settle back in and keep watching.
+- box: where on the LAST image the thing that riff or pick is about is (one video's thumbnail and title, one post), as a \
+tight rectangle in that image's pixels. The bubble shows that piece, so {HOST} can see which one you mean even after \
+scrolling away. null when the riff is about the whole screen.
 - You see stills, so captions and lyrics are caught mid-line ("Midnight tra", "DON'T MAKE M..."). That's the camera, \
 not the video: read past it and never joke about the cut-off.
 - Every riff is fresh: don't reuse a setup or a reference from earlier lines (no running "X would..." gag), and don't \
@@ -217,6 +220,37 @@ def characters(cast):
     return {n: cards.get(n, '') for n, _ in cast}
 
 
+def _size(jpeg):
+    try:
+        from PIL import Image; import io
+        return Image.open(io.BytesIO(jpeg)).size
+    except Exception: return None
+
+
+def _crop(jpeg, box, maxw=176, maxh=112):
+    """the piece of a look a riff is about, as a small PNG for its bubble (None without Pillow or a sensible box)"""
+    try:
+        from PIL import Image; import io
+        im = Image.open(io.BytesIO(jpeg)); W, H = im.size
+        x0, y0, x1, y1 = [float(v) for v in box]
+        if not (0 <= x0 < x1 <= W + 4 and 0 <= y0 < y1 <= H + 4) or (x1 - x0) * (y1 - y0) > .6 * W * H: return None
+        if x1 - x0 < 24 or y1 - y0 < 16: return None
+        im = im.crop((int(x0), int(y0), int(min(x1, W)), int(min(y1, H))))
+        im.thumbnail((maxw, maxh))
+        b = io.BytesIO(); im.convert('RGB').save(b, 'PNG'); return b.getvalue()
+    except Exception: return None
+
+
+def _rawlog(text, imgs, reply):
+    """every exchange with Haiku, verbatim (minus the pictures), in ~/.cache/ohaiku/gallery/raw-<date>.jsonl"""
+    try:
+        with open(os.path.join(WORK, time.strftime('raw-%Y-%m-%d.jsonl')), 'a') as f:
+            if f.tell() == 0: f.write(json.dumps({'system': SYSTEM}, ensure_ascii=False) + '\n')
+            f.write(json.dumps({'time': time.strftime('%H:%M:%S'), 'images': [_size(j) for j in imgs], 'sent': text,
+                                'reply': reply}, ensure_ascii=False) + '\n')
+    except OSError: pass
+
+
 def look(imgs, cast, history, same_for=0):
     """ask Haiku about one look (the whole screen, and maybe the window in front, sharper). cast: [(name, what they
     are)]; history: recent lines. -> dict"""
@@ -226,8 +260,11 @@ def look(imgs, cast, history, same_for=0):
         '\n'.join('- %s (%s)%s' % (n, m, ': ' + cards[n] if cards.get(n) else '') for n, m in cast), '\n'.join(history[-10:]) or '(nothing yet: the lights just went down)',
         'The same thing has been up for about %d minutes.\n\n' % same_for if same_for >= 3 else '',
         ', then the window %s is looking at' % HOST if len(imgs) > 1 else '')
+    size = _size(imgs[-1])
+    if size: text += ' The last image is %dx%d pixels.' % size
     out = _claude([{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': base64.b64encode(j).decode()}} for j in imgs]
                   + [{'type': 'text', 'text': text}], SYSTEM)
+    _rawlog(text, imgs, out)
     m = re.search(r'\{.*\}', out, re.S)
     d = json.loads(m.group(0)) if m else {}
     names = {n for n, _ in cast}
@@ -235,9 +272,12 @@ def look(imgs, cast, history, same_for=0):
     for r in riffs:
         r['line'] = str(r['line']).strip()[:90]
         if r.get('pose') not in POSES: r['pose'] = 'giggle'
+        r['thumb'] = _crop(imgs[-1], r.get('box'))
     pick = d.get('pick') if isinstance(d.get('pick'), dict) and str(d['pick'].get('line') or '').strip() else None
     if pick:
+        box = pick.get('box')
         pick = {k: str(pick.get(k) or '').strip() for k in ('who', 'title', 'line')}
+        pick['thumb'] = _crop(imgs[-1], box)
         pick['line'] = pick['line'][:90]
         if pick['who'] not in names: pick['who'] = None          # the app hands it to someone in the row
     note, want = d.get('note'), d.get('want')

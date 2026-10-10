@@ -953,8 +953,13 @@ class Balloon:
 class Speech:
     """a comic speech bubble over a chibi: a quip from the Peanut Gallery, or an agent saying what it needs"""
 
-    def __init__(self, app, who, text, life=5.0, pick=False):
+    def __init__(self, app, who, text, life=5.0, pick=False, thumb=None):
         self.app, self.who, self.t, self.life, self.pick = app, who, 0.0, life, pick
+        self.img = None                                    # the piece of the screen they mean (a PNG from the gallery)
+        if thumb:
+            try:
+                ld = GdkPixbuf.PixbufLoader(); ld.write(thumb); ld.close(); self.img = ld.get_pixbuf()
+            except Exception: self.img = None
         words, lines = text.split(), ['']
         for w_ in words:
             if lines[-1] and len(lines[-1]) + 1 + len(w_) > 30: lines.append(w_)
@@ -962,8 +967,9 @@ class Speech:
         self.lines = lines[:4]
         cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12.5)
-        self.W = int(max(cr.text_extents(l).x_advance for l in self.lines) + 26)
-        self.H = 16 * len(self.lines) + 16 + 14
+        self.W = int(max([cr.text_extents(l).x_advance for l in self.lines] + ([self.img.get_width()] if self.img else [])) + 26)
+        self.ih = self.img.get_height() + 8 if self.img else 0
+        self.H = 16 * len(self.lines) + 16 + 14 + self.ih
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
         w.set_app_paintable(True)
         vis = w.get_screen().get_rgba_visual()
@@ -1002,9 +1008,14 @@ class Speech:
         cr.set_source_rgba(*((1, .93, .62, .98) if self.pick else (1, .98, .95, .97))); cr.fill_preserve()
         cr.set_source_rgba(.29, .17, .11, .9); cr.set_line_width(2.6 if self.pick else 2); cr.stroke()
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12.5)
+        if self.img:
+            ix = (self.W - 2 - self.img.get_width()) / 2
+            Gdk.cairo_set_source_pixbuf(cr, self.img, ix, 10); cr.paint()
+            cr.rectangle(ix - .5, 9.5, self.img.get_width() + 1, self.img.get_height() + 1)
+            cr.set_source_rgba(.29, .17, .11, .55); cr.set_line_width(1); cr.stroke()
         cr.set_source_rgb(.29, .17, .11)
         for i, l in enumerate(self.lines):
-            cr.move_to(13, 21 + 16 * i); cr.show_text(l)
+            cr.move_to(13, 21 + 16 * i + self.ih); cr.show_text(l)
         return True
 
 
@@ -1586,9 +1597,9 @@ class App:
             c.duck = 0
             c.tick_draw()
 
-    def speak(self, c, text, life=5.0, pick=False):
+    def speak(self, c, text, life=5.0, pick=False, thumb=None):
         self.speeches = [b for b in self.speeches if not (b.who is c and (b.win.destroy() or True))]
-        self.speeches.append(Speech(self, c, text, life, pick))
+        self.speeches.append(Speech(self, c, text, life, pick, thumb))
 
     def drop_pick(self):
         """the gallery's standing request goes when the screen changes (or the gallery stops)"""
@@ -1725,7 +1736,7 @@ class App:
         cast = self.cast_map()
         for i, r in enumerate(res['riffs']):
             c = cast.get(r['who'])
-            if c: GLib.timeout_add(int(i * 2800) + 1, self.riff, c, r['pose'], r['line'])
+            if c: GLib.timeout_add(int(i * 2800) + 1, self.riff, c, r['pose'], r['line'], False, r.get('thumb'))
         t = len(res['riffs']) * 2800 + 400
         if res['want'] and cast:                    # say the wish out loud, so Mark hears what they'd love to see
             c = random.choice(list(cast.values()))
@@ -1736,17 +1747,17 @@ class App:
         if res.get('pick') and cast:                 # their request: stays up until the screen changes
             c = cast.get(res['pick']['who']) or random.choice(list(cast.values()))
             g = getattr(self, 'pick_gen', 0)
-            GLib.timeout_add(t, lambda: self.riff(c, 'cheer', res['pick']['line'], True) if getattr(self, 'pick_gen', 0) == g else False)
+            GLib.timeout_add(t, lambda: self.riff(c, 'cheer', res['pick']['line'], True, res['pick'].get('thumb')) if getattr(self, 'pick_gen', 0) == g else False)
         return False
 
-    def riff(self, c, pose, line, pick=False):
+    def riff(self, c, pose, line, pick=False, thumb=None):
         if c.gone or self.hidden or self.locked or (pick and not self.gallery_on): return False
-        life = 3.2 + len(line) / 16
+        life = 3.2 + len(line) / 16 + (1.5 if thumb else 0)
         if c in self.audience:
             c.set({'gasp': 'giggle', 'cheer': 'giggle'}.get(pose, pose)); c.next_fidget = time.time() + life
         else:
             c.react = (pose, time.time() + min(life, 4.5))
-        self.speak(c, line, float('inf') if pick else life, pick)
+        self.speak(c, line, float('inf') if pick else life, pick, thumb)
         return False
 
     def balloon(self, c, title, body='', life=4.0):

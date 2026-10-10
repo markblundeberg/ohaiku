@@ -22,7 +22,7 @@ so the chibis can be see-through (Cinnamon, KDE, Xfce with compositing on, GNOME
 desktops are untested.
 
 ```sh
-sudo apt install python3-gi gir1.2-gtk-3.0 python3-gi-cairo python3-xlib wmctrl ffmpeg pulseaudio-utils curl
+sudo apt install python3-gi gir1.2-gtk-3.0 python3-gi-cairo python3-xlib python3-pil wmctrl ffmpeg pulseaudio-utils curl
 git clone https://github.com/markblundeberg/ohaiku && cd ohaiku
 ./install.sh          # fetches the sprites (~45 MB) and adds "Load Up Haiku" to the menu
 ./ohaiku --agents     # a chibi for each Claude Code session (add this to your startup apps)
@@ -184,6 +184,10 @@ technique, a striking bit of art or writing). It remembers the last few looks, s
 - **Inspo**: if you keep a `~/claude-inspo` folder (a scrapbook your Claudes share), the recap's *Worth keeping* list
   (each with its source) and the three wishes they want most (Haiku picks them from the evening's candidates) also go to
   `~/claude-inspo/peanut-gallery/` (`<date>.md`, `wishlist.md`). Nothing is fetched by itself: the wishlist waits for you, or a Claude you ask.
+- **What they mean**: a quip or a pick about one thing (a video, a post) carries a little crop of it in its bubble, so
+  you can tell which one, even after you've scrolled past.
+- **The raw log**: every exchange with Haiku, verbatim (the prompt, the image sizes, its whole reply; not the images),
+  goes to `~/.cache/ohaiku/gallery/raw-<date>.jsonl`, with the day's system prompt as the first line.
 - **Characters**: the first time a name joins the cast, Haiku invents who they are (what they love to watch, how they
   react, a quirk), and they keep it: the cards live in `~/.config/ohaiku/cast.json`, so edit any you'd like different.
   They're gremlins, not a help desk: they tease your taste, bicker, get bored, and sulk for a line if you skip their pick.
