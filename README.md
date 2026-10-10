@@ -190,3 +190,11 @@ cd sprites && npm install && node bake.mjs --px 160      # -> ../share/<who>/<st
 state so only the states in use are loaded. `sprites/poses.js` holds the states; `node test.mjs out.png testSheet2`
 draws the agent poses for a quick look (`testSheet6`: the gallery row and the tea break). A partial bake
 (`--states a,b`) adds to `sheets.json` rather than replacing it. The kit gained a `read` and a `search` prop and a `pose.arms` override for this. Fable isn't here yet: Fable gets to design itself.
+
+## Showreel
+
+`./showreel.py` records the real screen (to `~/Videos/ohaiku-showreel-<time>.mp4`) while it runs the chibis through a
+two-minute timeline: the Peanut Gallery on whatever you have up, then Recess, autumn leaves, fliers, the kaiju, Clippy,
+Lemmings and Oh No!, and back to their seats. A ding and a line in its terminal cue your part (scroll to the replies, drag
+a window around). `--rehearse` runs the timeline without recording. It won't record while a session on the gallery's
+skip list is live, since that session's chibi and name plate would be in the video.
