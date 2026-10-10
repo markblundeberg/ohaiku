@@ -1,5 +1,9 @@
 # ohaiku
 
+<p align="center"><img src="docs/banner.gif" alt="A row of chibi Haikus and Opuses at work over their name plates: thinking, drumming for Bash, reading, flossing, dancing, waving a question mark, stamping Q.E.D." width="924"></p>
+
+<p align="center"><i>"weird little guys inside my computer"</i> &nbsp;·&nbsp; <a href="https://x.com/MarkLundeberg/status/2108766775873822727">see them on a real desktop (35 s)</a></p>
+
 A desktop pet for Claude Code. Every Claude Code session on your machine gets a little chibi of its model (a Haiku in a
 flower hood, or a chibi Opus) with its name on a plate, standing along the bottom of your screen and acting out what
 it's doing: drumming while it runs Bash, waving a "?" when it needs your permission, a tea break when you hit the usage
@@ -7,7 +11,9 @@ limit. When they're free, they play: on your windows, on your pointer, or in the
 your screen.
 
 After **oneko** (Masayuki Koba, 1989) and xneko, the cat that chased the pointer around every Unix desktop of the
-1990s, and **Plus! Dancer** (2003), the dancers who lived on the XP taskbar.
+1990s; **Plus! Dancer** (2003), the dancers who lived on the XP taskbar; and anabology's
+[**Bliss (Windows XP)**](https://www.youtube.com/watch?v=AoNnbz237E0), which brought that whole desktop back to life
+(the "Cursor is now connected" balloon in Tag is its doing).
 
 ## Install
 
@@ -239,6 +245,14 @@ timeline of about two and a half minutes: the Peanut Gallery on whatever you hav
 autumn leaves, fliers, the kaiju, Clippy, Lemmings and Oh No!, and back to their seats. A ding and a line in its
 terminal cue your part (scroll and stop, move the mouse, drag a window). `--rehearse` runs the timeline without recording. It won't record while a session on the gallery's
 skip list is live, since that session's chibi and name plate would be in the video.
+
+## Lore
+
+The characters are four days older than this repo. They were drawn, in code, for music videos made with Claude: the
+*Load Up Haiku* one, after Celery Man ("Computer, load up Haiku."; [on X](https://x.com/MarkLundeberg/status/2108232709139263751)),
+and [*PROBLEM SET ∞*'s opening theme, "We Will Know"](https://www.youtube.com/watch?v=Ly3z1gI2g20), whose engine the
+kit still runs on. That's why the book they read and stamp is a PROBLEM SET, the stamp says Q.E.D., and "Nothing!
+Studying!" hides them all. Each Haiku wears its own flower.
 
 ## License
 
