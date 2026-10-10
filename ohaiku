@@ -729,9 +729,7 @@ CLIPPY = [   # (window-title pattern, the balloon)
 PROGRAMME = os.path.expanduser('~/.config/ohaiku/programme.txt')
 PROGRAMME_DEFAULT = """# Haiku Theater 3000's programme. One per line: a video file, a folder (every video in it), or a URL (streamed
 # with yt-dlp). Played muted, in random order. You can also drag a video onto the theater window to put it on next.
-~/git/bc1/out/bloomcore_v6.mp4
-~/git/bc2/out/bc2_v1.mp4
-~/claude-inspo
+~/Videos
 """
 VIDEO_EXT = ('.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v', '.gif')
 

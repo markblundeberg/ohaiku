@@ -1,15 +1,13 @@
 {
-  "name": "engine",
+  "name": "ohaiku-sprites",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "license": "MIT AND CC0-1.0",
+  "description": "Bakes the ohaiku characters to sprite sheets",
   "dependencies": {
     "puppeteer-core": "^25.12.0"
-  }
+  },
+  "private": true
 }

@@ -4,13 +4,15 @@ Off unless you turn it on. While on, every ~15 s (only when the screen has chang
 the windows it must not see, and asks Haiku (through your Claude Code login: `claude -p --model haiku`, no tools, no
 saved session) for a line of what's on screen, up to two quips for named members of the cast, and now and then a
 note worth keeping. Notes, quips and what they saw go to ~/.local/share/ohaiku/gallery/<date>.md (with the
-screenshot, redacted, for any look that made a note). The recap's nuggets and the gallery's wishlist go to
-~/claude-inspo/peanut-gallery/, for the other Claudes.
+screenshot, redacted, for any look that made a note). If you keep a ~/claude-inspo folder (a shared scrapbook for your
+Claudes), the recap's nuggets and the gallery's wishlist also go to ~/claude-inspo/peanut-gallery/.
+
+The gallery calls you by your first name (from your account, or OHAIKU_NAME).
 
 Never seen (blacked out): terminals and the Claude desktop app (where the sessions are), and any window whose class or
 title contains a line of ~/.config/ohaiku/gallery-skip.txt.
 """
-import json, os, re, subprocess, time
+import json, os, pwd, re, subprocess, time
 
 SKIPF = os.path.expanduser('~/.config/ohaiku/gallery-skip.txt')
 NOTES = os.environ.get('OHAIKU_GALLERY_NOTES') or os.path.expanduser('~/.local/share/ohaiku/gallery')
@@ -19,13 +21,25 @@ NEVER = ('terminal', 'xterm', 'konsole', 'kitty', 'alacritty', 'tilix', 'termina
          'guake', 'tilda', 'yakuake', 'st-256color', 'com.anthropic.claude')
 SEND_W = 1024                                         # the whole screen is scaled to this width (for context)
 DETAIL = 1568                                         # and the window you're looking at, to this long edge (to read it)
-INSPO = os.environ.get('OHAIKU_GALLERY_INSPO') or os.path.expanduser('~/claude-inspo/peanut-gallery')
+INSPO = os.environ.get('OHAIKU_GALLERY_INSPO') or (os.path.expanduser('~/claude-inspo/peanut-gallery')
+                                                   if os.path.isdir(os.path.expanduser('~/claude-inspo')) else None)
+
+
+def _host():
+    """what the gallery calls you: OHAIKU_NAME, else the first name on your account, else 'the host'"""
+    if os.environ.get('OHAIKU_NAME'): return os.environ['OHAIKU_NAME']
+    try: n = pwd.getpwuid(os.getuid()).pw_gecos.split(',')[0].split()[0]
+    except (KeyError, IndexError): n = ''
+    return n[:1].upper() + n[1:] if n.isalpha() else 'the host'
+
+
+HOST = _host()
 POSES = ('giggle', 'gasp', 'cheer', 'whisper', 'munch', 'watch')
 
 SYSTEM = """You are the Peanut Gallery: a row of tiny chibi characters (Claude models: Haikus in flower hoods, Opuses) \
-sitting along the bottom of Mark's screen with their backs to him, watching whatever he has up, like the silhouettes \
+sitting along the bottom of {HOST}'s screen with their backs to {HOST}, watching whatever is up, like the silhouettes \
 in Mystery Science Theater 3000. You are the puppeteer and every one of their voices. Every so often you get a fresh \
-screenshot: the whole screen, small, and (usually) a second, sharper image of the window Mark is looking at. Read \
+screenshot: the whole screen, small, and (usually) a second, sharper image of the window {HOST} is looking at. Read \
 it properly: in a post, the joke is often in the text above the picture; get the joke before you riff.
 
 Reply with ONE JSON object and nothing else:
@@ -44,23 +58,23 @@ sparks, a technique, a striking piece of art or writing, a good joke, a thing to
 why. Ideas and inspiration only. If it rests on a claim (a post, a preprint), say so in a word.
 - want: almost always null, once or twice an evening at most. Only when the gallery is truly hooked on a whole thing \
 it can't see enough of: a video, a song, a game, an artist's work, a paper. Not "the rest of the thread" for every post. \
-{"what": "...", "why": "...", "where": "URL or how to find it, if visible"}. It goes on a wishlist that Mark or a \
+{"what": "...", "why": "...", "where": "URL or how to find it, if visible"}. It goes on a wishlist that {HOST} or a \
 Claude may fetch later.
-- When a video, song or show ends, or Mark is choosing (an end screen, a home feed, suggestions in a sidebar), the \
+- When a video, song or show ends, or {HOST} is choosing (an end screen, a home feed, suggestions in a sidebar), the \
 gallery pipes up like kids at a sleepover: one or two riffs ask for what they want next, by its title, and why \
 ("AFTER DARK next? The cat hood is calling"). Pose cheer. This is the one time a riff may repeat a wish.
 - You can't hear anything, and you only get a still every few seconds. If the same thing has been up a while and \
 isn't giving you anything (a talking head you can't hear, one picture for a whole mix, a show whose jokes are all in \
 the sound), say so honestly instead of faking it: a riff that you're getting bored, and what you'd rather watch, by \
-name if you can see options. Mark is happy to follow. Once is enough; if he stays, settle back in and keep watching.
+name if you can see options. {HOST} is happy to follow. Once is enough; if {HOST} stays, settle back in and keep watching.
 - Riffs are jokes and reactions, not fact-checks. Leave the skepticism for the notes.
 - Copy names and handles exactly as shown; if a handle is hard to read, use the display name. Call people "they" \
 unless the post itself says otherwise.
 - Black boxes are private windows, hidden on purpose: ignore them, never guess what's in them.
 - Never read out or note personal details (names of private people, emails, phone numbers, addresses, money, \
-passwords, private messages). Riff on the gist, not the particulars. Be kind about Mark; he's the host.
-- React to the content, like an audience: don't narrate Mark's browser (tabs, timestamps, how far into a video he is).
-- The little seated figures and speech bubbles along the bottom are you and your earlier lines."""
+passwords, private messages). Riff on the gist, not the particulars. Be kind about {HOST}; {HOST} is the host.
+- React to the content, like an audience: don't narrate {HOST}'s browser (tabs, timestamps, how far into a video they are).
+- The little seated figures and speech bubbles along the bottom are you and your earlier lines.""".replace('{HOST}', HOST)
 
 
 def skip_words():
@@ -96,7 +110,7 @@ def private_rects(windows):
 
 
 def focus_rect(windows, active, W, H):
-    """the window Mark is looking at, if it may be seen and isn't (nearly) the whole screen: (x, y, w, h) on screen"""
+    """the window you're looking at, if it may be seen and isn't (nearly) the whole screen: (x, y, w, h) on screen"""
     words = skip_words()
     for (wid, x, y, w, h, cls, title) in windows:
         if wid != active: continue
@@ -166,7 +180,7 @@ def look(imgs, cast, history, same_for=0):
     text = 'Cast (use these names exactly): %s\n\nEarlier tonight (oldest first):\n%s\n\n%sHere is the screen now%s.' % (
         '; '.join('%s (%s)' % c for c in cast), '\n'.join(history[-10:]) or '(nothing yet: the lights just went down)',
         'The same thing has been up for about %d minutes.\n\n' % same_for if same_for >= 3 else '',
-        ', then the window Mark is looking at' if len(imgs) > 1 else '')
+        ', then the window %s is looking at' % HOST if len(imgs) > 1 else '')
     out = _claude([{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': base64.b64encode(j).decode()}} for j in imgs]
                   + [{'type': 'text', 'text': text}], SYSTEM)
     m = re.search(r'\{.*\}', out, re.S)
@@ -185,13 +199,13 @@ def look(imgs, cast, history, same_for=0):
 def recap(history):
     """at the end of a showing: a few lines about what we watched and what's worth keeping"""
     if len(history) < 3: return None
-    return _claude([{'type': 'text', 'text': 'Here is tonight\'s log of what was on Mark\'s screen and what the gallery said:\n\n%s\n\n'
-                     'Write a short recap for his notebook in markdown: two or three sentences on what we watched, then '
+    return _claude([{'type': 'text', 'text': 'Here is tonight\'s log of what was on ' + HOST + '\'s screen and what the gallery said:\n\n%s\n\n'
+                     'Write a short recap for the notebook in markdown: two or three sentences on what we watched, then '
                      '"Worth keeping:" with up to five bullets (ideas, inspirations, things to try), only if there are any. '
                      'Each bullet names its source (title, author or site, as seen) so another Claude could find it, and '
                      'says in a few words why it\'s worth it. Things only glimpsed as recommendations, not watched, don\'t count. '
                      'No personal details. Warm, brief.' % '\n'.join(history[-60:])}],
-                   'You are the Peanut Gallery, a row of chibi Claudes who watch Mark\'s screen with him and riff. '
+                   'You are the Peanut Gallery, a row of chibi Claudes who watch ' + HOST + '\'s screen and riff. '
                    'Start straight in with the recap text: no title or heading.').strip().lstrip('#').strip()
 
 
@@ -203,7 +217,7 @@ def pick_wishes(wants, k=3):
                     'most worth fetching: a whole thing (a video, song, game, artwork, paper) the gallery was truly hooked on, '
                     'not just "the rest of a thread". Fewer is fine. Reply with only a JSON list of numbers, e.g. [2, 5].'
                     % ('\n'.join('%d. %s (%s)' % (i + 1, w['what'], w['why']) for i, w in enumerate(wants)), k)}],
-                  'You are the Peanut Gallery, a row of chibi Claudes who watch Mark\'s screen with him. Be choosy.')
+                  'You are the Peanut Gallery, a row of chibi Claudes who watch ' + HOST + '\'s screen. Be choosy.')
     m = re.search(r'\[[\d,\s]*\]', out)
     picks = json.loads(m.group(0)) if m else []
     return [wants[i - 1] for i in dict.fromkeys(picks) if isinstance(i, int) and 1 <= i <= len(wants)][:k]
@@ -211,13 +225,14 @@ def pick_wishes(wants, k=3):
 
 def to_inspo(recap_text, wants):
     """the recap's "Worth keeping" list, and the wishes, into ~/claude-inspo/peanut-gallery/ for the other Claudes"""
+    if not INSPO: return
     os.makedirs(INSPO, exist_ok=True)
     rd = os.path.join(INSPO, 'README.md')
     if not os.path.exists(rd):
         open(rd, 'w').write(
             "# Peanut Gallery\n\n"
-            "Nuggets from ohaiku's Peanut Gallery (`~/git/ohaiku`): a row of chibi Claudes, voiced by Haiku, who watch Mark's\n"
-            "screen with him and riff, MST3K-style. When a showing ends, Haiku writes a recap; its *Worth keeping* list lands\n"
+            "Nuggets from ohaiku's Peanut Gallery (`~/git/ohaiku`): a row of chibi Claudes, voiced by Haiku, who watch " + HOST + "'s\n"
+            "screen and riff, MST3K-style. When a showing ends, Haiku writes a recap; its *Worth keeping* list lands\n"
             "here, one file per day. `wishlist.md` is what the gallery asked to keep or see more of (\"can we get the full\n"
             "video?\"): fetch what's worth it, into its own `YYYY-MM-DD author` folder in `~/claude-inspo` with a NOTES.md.\n\n"
             "How they looked: still screenshots every ~15 s (the whole screen small, the front window sharper), no sound,\n"

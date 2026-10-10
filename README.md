@@ -1,8 +1,45 @@
 # ohaiku
 
-Haiku 5.5 on your desktop, and a taskbar of agents. After **oneko** (Masayuki Koba, 1989) and xneko, the cat that chased
-the pointer around every Unix desktop of the 1990s, and **Plus! Dancer** (2003), the dancers who lived on the XP
-taskbar (which BLISS brought back).
+A desktop pet for Claude Code. Every Claude Code session on your machine gets a little chibi of its model (a Haiku in a
+flower hood, or a chibi Opus) with its name on a plate, standing along the bottom of your screen and acting out what
+it's doing: drumming while it runs Bash, waving a "?" when it needs your permission, a tea break when you hit the usage
+limit. When they're free, they play: on your windows, on your pointer, or in the Peanut Gallery, heckling whatever is on
+your screen.
+
+After **oneko** (Masayuki Koba, 1989) and xneko, the cat that chased the pointer around every Unix desktop of the
+1990s, and **Plus! Dancer** (2003), the dancers who lived on the XP taskbar.
+
+## Install
+
+Linux, in an **X11** session (not Wayland: `echo $XDG_SESSION_TYPE` should say `x11`), with a compositing window manager
+so the chibis can be see-through (Cinnamon, KDE, Xfce with compositing on, GNOME on Xorg...). Made on Cinnamon; other
+desktops are untested.
+
+```sh
+sudo apt install python3-gi gir1.2-gtk-3.0 python3-gi-cairo python3-xlib wmctrl ffmpeg pulseaudio-utils curl
+git clone https://github.com/markblundeberg/ohaiku && cd ohaiku
+./install.sh          # fetches the sprites (~45 MB) and adds "Load Up Haiku" to the menu
+./ohaiku --agents     # a chibi for each Claude Code session (add this to your startup apps)
+```
+
+Optional: `yt-dlp` (URLs in Movie night). The agents need Claude Code (they're its sessions), and the Peanut Gallery
+uses its `claude` command.
+
+### If you're a Claude installing this for someone
+
+- **What it reads**: `~/.claude/sessions/*.json` and the tails of the transcripts in `~/.claude/projects/`, read-only,
+  to see what each session is doing. It never writes to Claude Code's files and needs no hooks.
+- **What it writes**: `~/.config/ohaiku/` (the movie programme, the gallery's skip list), `~/.cache/ohaiku/`,
+  `~/.local/share/ohaiku/gallery/` (the gallery's notebook), small pid/command files in `$XDG_RUNTIME_DIR`, and two
+  menu entries in `~/.local/share/applications/` (`install.sh`).
+- **The network**: `install.sh` downloads the sprite pack from this repo's latest release. Movie night streams URLs you
+  put in its programme with yt-dlp. The **Peanut Gallery**, off unless the user turns it on, sends redacted screenshots
+  to Haiku through the user's own Claude Code login (`claude -p`); read the gallery section below with them before they
+  turn it on. Nothing else goes anywhere.
+- **Checks**: an X11 session and a compositor (without one, the chibis sit in black squares). If the sprites can't be
+  downloaded, bake them (below; it needs Node and Chrome).
+- **Nice to set up**: autostart `ohaiku --agents`; a hotkey for `ohaiku --toggle` (hide/show); the gallery's skip list
+  (`~/.config/ohaiku/gallery-skip.txt`, one word per line) for any project or window that must never be watched.
 
 ## The agents
 
@@ -66,8 +103,8 @@ Left-click it to switch between Play and Perch.
 | **Perch** | the bottom edge; free ones wander a little; duck from the pointer |
 | **Follow** | oneko: a conga line after the pointer; sleepers wake up |
 | **Recess** | shimeji: they leap onto the title bars of your real windows (`world.py` reads which window tops are visible, through python-xlib), walk along them, hop between them, ride along when you drag a window, and fall off with a "!" when it closes or something covers their spot. Working agents pick a spot and keep working there. With everything maximized there are no title bars to stand on, so they play on the floor |
-| **Tag** | one Haiku surfs your pointer on an XP arrow ("Cursor is now connected", after BLISS); the rest run from it, slipping along the screen edges when cornered. Touch one and it's It: it chases the pointer until it tags you back |
-| **Bloomcore** | the bc1 eruption: ten more Haikus burst out of the tray and fly onto your windows, everyone dances, and one of the twelve flowers opens wherever a Haiku lands. Leaving Bloomcore folds the extras back into flowers |
+| **Tag** | one Haiku surfs your pointer on an XP arrow ("Cursor is now connected"); the rest run from it, slipping along the screen edges when cornered. Touch one and it's It: it chases the pointer until it tags you back |
+| **Bloomcore** | the eruption from the *Load Up Haiku* music video: ten more Haikus burst out of the tray and fly onto your windows, everyone dances, and one of the twelve flowers opens wherever a Haiku lands. Leaving Bloomcore folds the extras back into flowers |
 
 **Lemmings** ("Let's go!"): `--lemmings` or the menu. A trapdoor opens above your highest window and ten small Haikus
 drop out one by one and march: off window edges, down onto whatever is below, round at the screen sides, towards a
@@ -107,7 +144,7 @@ Recycle Bin?")... `--clippy` to ask now.
 3000*, put on a film, muted, and three of them hop into a row of velvet cinema seats along its bottom edge, seen from
 behind with headphones on: bobbing, eating popcorn, giggling, turning to whisper. The programme is
 `~/.config/ohaiku/programme.txt` (written on first use): video files, folders (every video inside), or URLs (streamed
-through yt-dlp), shuffled. By default it's our films and everything in `~/claude-inspo`, so BLISS gets an audience.
+through yt-dlp), shuffled. By default it's everything in `~/Videos`.
 Drag any video onto the theater to put it on next. Films are decoded live by ffmpeg at 12 fps; a long one starts
 somewhere in the middle. It's a real window: move it and they move with it, stand on it in Recess, close it and they
 jump up with a "!". It never takes focus. In Recess and Bloomcore they sometimes put a film on by themselves (at most
@@ -137,11 +174,14 @@ technique, a striking bit of art or writing). It remembers the last few looks, s
   Notes" in the tray menu). When a video ends, or you're picking from a feed, they ask for what they want next; and
   since they can't hear and only see stills, they'll say when something has stopped giving them anything (the same
   window for a while), and what they'd rather watch. Movie night's audience joins the cast, so a film in the theater gets riffed too.
-- **Inspo**: the recap's *Worth keeping* list (each with its source) and the three wishes they want most (Haiku picks
-  them from the evening's candidates) also go to `~/claude-inspo/peanut-gallery/` (`<date>.md`, `wishlist.md`), for
-  the other Claudes. Nothing is fetched by itself: the wishlist waits for you, or a Claude you ask.
+- **Inspo**: if you keep a `~/claude-inspo` folder (a scrapbook your Claudes share), the recap's *Worth keeping* list
+  (each with its source) and the three wishes they want most (Haiku picks them from the evening's candidates) also go to
+  `~/claude-inspo/peanut-gallery/` (`<date>.md`, `wishlist.md`). Nothing is fetched by itself: the wishlist waits for you, or a Claude you ask.
 - **Its own head**: the gallery's Haiku runs with `--setting-sources ''`, so it doesn't load your CLAUDE.md or
-  settings, only its own prompt.
+  settings, only its own prompt. It calls you by your first name (from your account; `OHAIKU_NAME` to change it).
+- **Where it goes**: each look is a request to Anthropic's API through your Claude Code login, under your account's
+  terms, like anything else you send Claude. Only what's on screen and not blacked out is sent; the notebook and saved
+  screenshots stay on your machine.
 
 **Nothing! Studying!** From any tier: shake the mouse hard left and right (or `--studying`, or the menu). Everyone spins
 into the tray icon, silently (it's for hiding them, so no sound), and three seconds later one Haiku peeks up by the
@@ -171,21 +211,22 @@ tray. They stay hidden until you click the tray icon.
 The first Haiku is the canonical sunflower one; the rest are the other eleven flowers in random order, no two alike until
 all twelve are out. In Play mode the leader chases the pointer and everyone else follows the one in front, so they make a
 line. When they catch up they sit, dance or go :3, then yawn, lie down and sleep with a nose bubble (鼻提灯). Move the
-pointer and the bubble pops: "!" and they're off. The ding is the music box from the end of *Load Up Haiku* (`~/git/bc1`).
+pointer and the bubble pops: "!" and they're off. The ding is the music box from the end of *Load Up Haiku*.
 
-Needs X11 with a compositor (Cinnamon has one), Python 3 with GTK 3 (PyGObject) and pycairo, and `paplay` for the ding.
 Each Haiku is a small transparent popup window with an empty input shape, so clicks go straight through.
 
 ## Sprites
 
-The Haikus are drawn by the real Haiku 5.5 kit from bc1/bc2 (`sprites/haiku.js`, with the PROBLEM SET ∞ engine's
-`core.js`/`chars.js`), and baked to sprite sheets once, the way oneko shipped bitmaps:
+The Haikus are drawn in code by the character kit from the *Load Up Haiku* music video (`sprites/haiku.js`, with the
+PROBLEM SET ∞ engine's `core.js`/`chars.js`): every hood, face, prop and pose is canvas paths, so they can be redrawn at
+any size. They're baked to sprite sheets once, the way oneko shipped bitmaps, with headless Chrome:
 
 ```sh
-cd sprites && npm install && node bake.mjs --px 160      # -> ../share/<who>/<state>.png strips + sheets.json
+cd sprites && npm install && CHROME=/usr/bin/google-chrome node bake.mjs --px 160   # -> ../share/<who>/<state>.png + sheets.json
 ```
 
-(`share/` is generated and gitignored; so is the Kaiju's big strip set, `node bake.mjs --px 560 --who opus0,opus3
+(`share/` is generated and gitignored. The release's sprite pack is this bake reduced to 256-colour palettes, which
+look the same at a sixth of the size; so is the Kaiju's big strip set, `node bake.mjs --px 560 --who opus0,opus3
 --states runL,runR,idle --out ../share/kaiju`.) Twelve Haikus (`haiku00`..`haiku11`) and eight chibi Opuses (`opus0`..`opus7`, varied bows and hair), one strip per
 state so only the states in use are loaded. `sprites/poses.js` holds the states; `node test.mjs out.png testSheet2`
 draws the agent poses for a quick look (`testSheet6`: the gallery row and the tea break). A partial bake
@@ -198,3 +239,12 @@ timeline of about two and a half minutes: the Peanut Gallery on whatever you hav
 autumn leaves, fliers, the kaiju, Clippy, Lemmings and Oh No!, and back to their seats. A ding and a line in its
 terminal cue your part (scroll and stop, move the mouse, drag a window). `--rehearse` runs the timeline without recording. It won't record while a session on the gallery's
 skip list is live, since that session's chibi and name plate would be in the video.
+
+## License
+
+Free to use, copy, change and share. The program is MIT; the artwork (the characters, their drawing code, the sprite
+sheets, the icon and the ding) is CC0, dedicated to the public domain; the fonts used for baking are OFL, from their
+authors. See [LICENSE](LICENSE).
+
+An unofficial fan project, not made or endorsed by Anthropic. Claude, Haiku and Opus are Anthropic's names, used here
+to say who the characters are.
