@@ -134,7 +134,9 @@ technique, a striking bit of art or writing). It remembers the last few looks, s
   "☆ can we get …?") go to
   `~/.local/share/ohaiku/gallery/<date>.md`, with the redacted screenshot saved beside it for any look that made a note
   or a wish. When you turn the gallery off, Haiku writes a short recap with a *Worth keeping* list ("Open the Gallery
-  Notes" in the tray menu). When a video ends, or you're picking from a feed, they ask for what they want next. Movie night's audience joins the cast, so a film in the theater gets riffed too.
+  Notes" in the tray menu). When a video ends, or you're picking from a feed, they ask for what they want next; and
+  since they can't hear and only see stills, they'll say when something has stopped giving them anything (the same
+  window for a while), and what they'd rather watch. Movie night's audience joins the cast, so a film in the theater gets riffed too.
 - **Inspo**: the recap's *Worth keeping* list (each with its source) and the three wishes they want most (Haiku picks
   them from the evening's candidates) also go to `~/claude-inspo/peanut-gallery/` (`<date>.md`, `wishlist.md`), for
   the other Claudes. Nothing is fetched by itself: the wishlist waits for you, or a Claude you ask.

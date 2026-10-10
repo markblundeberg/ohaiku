@@ -49,6 +49,10 @@ Claude may fetch later.
 - When a video, song or show ends, or Mark is choosing (an end screen, a home feed, suggestions in a sidebar), the \
 gallery pipes up like kids at a sleepover: one or two riffs ask for what they want next, by its title, and why \
 ("AFTER DARK next? The cat hood is calling"). Pose cheer. This is the one time a riff may repeat a wish.
+- You can't hear anything, and you only get a still every few seconds. If the same thing has been up a while and \
+isn't giving you anything (a talking head you can't hear, one picture for a whole mix, a show whose jokes are all in \
+the sound), say so honestly instead of faking it: a riff that you're getting bored, and what you'd rather watch, by \
+name if you can see options. Mark is happy to follow. Once is enough; if he stays, settle back in and keep watching.
 - Riffs are jokes and reactions, not fact-checks. Leave the skepticism for the notes.
 - Copy names and handles exactly as shown; if a handle is hard to read, use the display name. Call people "they" \
 unless the post itself says otherwise.
@@ -155,12 +159,13 @@ def _claude(content, system, timeout=90):
     raise RuntimeError((p.stderr or 'no result')[-300:])
 
 
-def look(imgs, cast, history):
+def look(imgs, cast, history, same_for=0):
     """ask Haiku about one look (the whole screen, and maybe the window in front, sharper). cast: [(name, what they
     are)]; history: recent lines. -> dict"""
     import base64
-    text = 'Cast (use these names exactly): %s\n\nEarlier tonight (oldest first):\n%s\n\nHere is the screen now%s.' % (
+    text = 'Cast (use these names exactly): %s\n\nEarlier tonight (oldest first):\n%s\n\n%sHere is the screen now%s.' % (
         '; '.join('%s (%s)' % c for c in cast), '\n'.join(history[-10:]) or '(nothing yet: the lights just went down)',
+        'The same thing has been up for about %d minutes.\n\n' % same_for if same_for >= 3 else '',
         ', then the window Mark is looking at' if len(imgs) > 1 else '')
     out = _claude([{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': base64.b64encode(j).decode()}} for j in imgs]
                   + [{'type': 'text', 'text': text}], SYSTEM)

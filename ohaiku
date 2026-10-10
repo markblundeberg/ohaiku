@@ -1644,6 +1644,7 @@ class App:
         W, H = S.d.screen().width_in_pixels, S.d.screen().height_in_pixels
         last_thumb, last_sent, hist, wait = None, 0.0, self.gal_hist, GAL_EVERY
         wants, log = [], []
+        showing, since = None, time.time()          # what's in front (window and title), and since when
         live = lambda: self.gallery_on and self.gal_gen == gen
         while live():
             time.sleep(1)
@@ -1652,8 +1653,10 @@ class App:
             if why: self.gal_why = why; continue
             if time.time() - last_sent < wait: continue
             try:
-                wins = S.windows()
-                imgs, th = gallery.capture(W, H, gallery.private_rects(wins) + list(self.gal_hide), gallery.focus_rect(wins, S.active(), W, H))
+                wins, act = S.windows(), S.active()
+                now_on = next(((w[0], w[6]) for w in wins if w[0] == act), None)
+                if now_on != showing: showing, since = now_on, time.time()
+                imgs, th = gallery.capture(W, H, gallery.private_rects(wins) + list(self.gal_hide), gallery.focus_rect(wins, act, W, H))
             except Exception as e:
                 print('ohaiku: gallery capture:', e, file=sys.stderr); last_sent, wait = time.time(), 60
                 self.gal_why = 'screenshot failed: %s' % str(e)[:80]; continue
@@ -1663,7 +1666,7 @@ class App:
             self.gal_why = 'looking...'
             GLib.idle_add(lambda: (self.placard and setattr(self.placard, 'blink', 1.0), False)[1])
             try:
-                res = gallery.look(imgs, list(self.gal_cast), hist)
+                res = gallery.look(imgs, list(self.gal_cast), hist, int((time.time() - since) / 60))
             except Exception as e:
                 print('ohaiku: gallery:', e, file=sys.stderr); wait = 60
                 self.gal_why = 'Haiku call failed: %s' % str(e)[:80]; continue
