@@ -1,9 +1,10 @@
 """gallery.py — the Peanut Gallery: a fast Haiku looks at your screen now and then and voices the chibis' reactions.
 
-Off unless you turn it on. While on, every ~15 s (only when the screen has changed) it takes a screenshot, blacks out
-the windows it must not see, and asks Haiku (through your Claude Code login: `claude -p --model haiku`, no tools, no
-saved session) for a line of what's on screen, up to two quips for named members of the cast, and now and then a
-note worth keeping. Notes, quips and what they saw go to ~/.local/share/ohaiku/gallery/<date>.md (with the
+Off unless you turn it on. While on, it keeps an eye on a tiny grey thumbnail of the screen, and soon after the
+screen changes (at most one look every ~6 s) it takes a screenshot, blacks out the windows it must not see, and asks
+Haiku (through your Claude Code login: `claude -p --model haiku`, no tools, no saved session) for a line of what's on
+screen, up to three quips for named members of the cast (each shown the moment it arrives), and now and then a note
+worth keeping. Notes, quips and what they saw go to ~/.local/share/ohaiku/gallery/<date>.md (with the
 screenshot, redacted, for any look that made a note). If you keep a ~/claude-inspo folder (a shared scrapbook for your
 Claudes), the recap's nuggets and the gallery's wishlist also go to ~/claude-inspo/peanut-gallery/.
 
@@ -12,7 +13,7 @@ The gallery calls you by your first name (from your account, or OHAIKU_NAME).
 Never seen (blacked out): terminals and the Claude desktop app (where the sessions are), and any window whose class or
 title contains a line of ~/.config/ohaiku/gallery-skip.txt.
 """
-import json, os, pwd, re, subprocess, time
+import json, os, pwd, re, subprocess, tempfile, threading, time
 
 SKIPF = os.path.expanduser('~/.config/ohaiku/gallery-skip.txt')
 NOTES = os.environ.get('OHAIKU_GALLERY_NOTES') or os.path.expanduser('~/.local/share/ohaiku/gallery')
@@ -21,6 +22,8 @@ NEVER = ('terminal', 'xterm', 'konsole', 'kitty', 'alacritty', 'tilix', 'termina
          'guake', 'tilda', 'yakuake', 'st-256color', 'com.anthropic.claude')
 SEND_W = 1024                                         # the whole screen is scaled to this width (for context)
 DETAIL = 1568                                         # and the window you're looking at, to this long edge (to read it)
+THUMB = (64, 36)                                      # the grey thumbnail it watches for changes
+EFFORT = 'low'                                        # for the looks: Haiku thinks less often first (each think is ~3 s)
 INSPO = os.environ.get('OHAIKU_GALLERY_INSPO') or (os.path.expanduser('~/claude-inspo/peanut-gallery')
                                                    if os.path.isdir(os.path.expanduser('~/claude-inspo')) else None)
 
@@ -44,15 +47,18 @@ it properly: in a post, the joke is often in the text above the picture; get the
 
 Reply with ONE JSON object and nothing else:
 {"seen": "what's on screen now, at most 12 words",
- "detail": "2 to 4 sentences for the notebook: what it is, concretely. Quote the headline, caption or joke text \
-(public posts and pages only), name the video, site or author when visible",
  "riffs": [{"who": "<a cast name>", "line": "<a quip, gasp or reaction, at most 70 characters>", \
 "pose": "giggle|gasp|cheer|whisper|munch|watch", "box": [x0, y0, x1, y1]}],
+ "detail": "2 to 4 sentences for the notebook: what it is, concretely. Quote the headline, caption or joke text \
+(public posts and pages only), name the video, site or author when visible",
  "pick": null,
  "note": null,
  "want": null}
 
-- riffs: 0 to 2. Funny, quick, MST3K energy, and always about what's on screen. Each of the cast has a character card \
+- riffs: 0 to 3, in the order they're said: each one appears on screen the moment you finish writing it. Funny, \
+quick, MST3K energy, and always about what's on screen. A later riff can answer an earlier one: someone else in the \
+row agreeing, topping it or pushing back, like a real row of hecklers. You look every few seconds, so pace yourselves: \
+one or two is usual, three when something's really happening or someone has to answer back. Each of the cast has a character card \
 (below): it's who they are, not a script. It shows in what they notice, what they love or can't stand, and when they \
 disagree with each other; never as a catchphrase, a signature opening or a running bit. Before you write a line for \
 someone, look at their earlier lines in the log: don't reuse their phrasing, format or framing. If nothing new happened since the \
@@ -70,7 +76,7 @@ watch it: the sidebar of suggestions doesn't count, so pick stays null, unless t
 it's giving you nothing (then pick what you'd rather see). {"who": "<a cast name>", "title": "<its title, exactly as shown>", "line": "<asking {HOST} for it, at most \
 70 characters, with the reason>"}, e.g. {"who": "ember", "title": "AFTER DARK", "line": "AFTER DARK next? The cat \
 hood is calling!", "box": [x0, y0, x1, y1]}. Pick from what's on screen. Otherwise null. Their bubble stays up until the screen changes.
-- You can't hear anything, and you only get a still every few seconds. If the same thing has been up a while and \
+- You can't hear anything, and you only get a still every several seconds. If the same thing has been up a while and \
 isn't giving you anything (a talking head you can't hear, one picture for a whole mix, a show whose jokes are all in \
 the sound), say so honestly instead of faking it: a riff that you're getting bored, and what you'd rather watch, by \
 name if you can see options. {HOST} is happy to follow. Once is enough; if {HOST} stays, settle back in and keep watching.
@@ -91,7 +97,9 @@ passwords, private messages). Riff on the gist, not the particulars.
 with each other. If {HOST} skips your pick, you can be miffed for a line; then it's back to the show, with no grudges \
 and no real anger.
 - React to the content, like an audience: don't narrate {HOST}'s browser (tabs, timestamps, how far into a video they are).
-- The little seated figures and speech bubbles along the bottom are you and your earlier lines.""".replace('{HOST}', HOST)
+- The little seated figures and speech bubbles along the bottom are you and your earlier lines.
+- Answer at once, without deliberating first: like a live audience, your first instinct is the funny one, and every \
+second you spend thinking, the picture is going stale.""".replace('{HOST}', HOST)
 
 
 def skip_words():
@@ -163,31 +171,103 @@ def capture(W, H, private, focus=None, display=None):
     return imgs, open(thumb, 'rb').read()
 
 
-def changed(a, b):
-    """mean absolute difference of two thumbnails, 0..255"""
+class Watch:
+    """the screen as a THUMB grey thumbnail, twice a second, from one ffmpeg that stays running: cheap enough to notice
+    a change soon after it happens (the looks themselves are separate, sharper screenshots)"""
+
+    def __init__(self, W, H, display=None):
+        self.n, self.last = THUMB[0] * THUMB[1], None
+        self.p = subprocess.Popen(['ffmpeg', '-loglevel', 'error', '-f', 'x11grab', '-draw_mouse', '0', '-framerate', '2',
+                                   '-video_size', '%dx%d' % (W, H), '-i', display or os.environ.get('DISPLAY', ':0'),
+                                   '-vf', 'scale=%d:%d:flags=area,format=gray' % THUMB, '-f', 'rawvideo', '-'],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        while True:
+            b = self.p.stdout.read(self.n)
+            if len(b) < self.n: return
+            self.last = b
+
+    def frame(self): return self.last
+    def alive(self): return self.p.poll() is None
+
+    def close(self):
+        self.p.kill(); self.p.wait()
+
+
+def changed(a, b, hide=(), W=1, H=1):
+    """mean absolute difference of two THUMB thumbnails, 0..255, leaving out the cells inside `hide` (screen rects
+    (x, y, w, h) on a W x H screen: private windows, ohaiku's own)"""
     if not a or not b or len(a) != len(b): return 255
-    return sum(abs(x - y) for x, y in zip(a, b)) / len(a)
+    tw, th = THUMB
+    keep = [k for k in range(len(a)) if not any(x <= (k % tw + .5) * W / tw < x + w and y <= (k // tw + .5) * H / th < y + h
+                                                for x, y, w, h in hide)]
+    return sum(abs(a[k] - b[k]) for k in keep) / len(keep) if keep else 0.0
 
 
 def _env():
     return {k: v for k, v in os.environ.items() if not (k.startswith('CLAUDE_CODE_') or k == 'CLAUDECODE')}
 
 
-def _claude(content, system, timeout=90):
-    import base64
+def _claude(content, system, timeout=90, on_text=None, effort=None):
+    """one call to Haiku -> its reply. on_text(the reply so far) is called as it streams in"""
     os.makedirs(WORK, exist_ok=True)
     msg = json.dumps({'type': 'user', 'message': {'role': 'user', 'content': content}})
-    p = subprocess.run(['claude', '-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--setting-sources', '',
-                        '--system-prompt', system,
-                        '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'],
-                       input=msg + '\n', capture_output=True, text=True, timeout=timeout, cwd=WORK, env=_env())
-    for ln in p.stdout.splitlines():
-        try: e = json.loads(ln)
-        except ValueError: continue
-        if e.get('type') == 'result':
-            if e.get('is_error'): raise RuntimeError(str(e.get('result'))[:200])
-            return e.get('result') or ''
-    raise RuntimeError((p.stderr or 'no result')[-300:])
+    err = tempfile.TemporaryFile('w+')
+    p = subprocess.Popen(['claude', '-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--setting-sources', '',
+                          '--system-prompt', system,
+                          '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose']
+                         + (['--include-partial-messages'] if on_text else [])
+                         + (['--effort', effort] if effort else []),
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, text=True, cwd=WORK, env=_env())
+    timer = threading.Timer(timeout, p.kill); timer.start()
+    so_far, out, fail = '', None, None
+    try:
+        p.stdin.write(msg + '\n'); p.stdin.close()
+        for ln in p.stdout:
+            try: e = json.loads(ln)
+            except ValueError: continue
+            if e.get('type') == 'stream_event' and on_text:
+                ev = e.get('event') or {}
+                if ev.get('type') == 'content_block_delta' and (ev.get('delta') or {}).get('type') == 'text_delta':
+                    so_far += ev['delta'].get('text') or ''
+                    try: on_text(so_far)
+                    except Exception: pass
+            elif e.get('type') == 'result':
+                if e.get('is_error'): fail = str(e.get('result'))[:200]
+                else: out = e.get('result') or ''
+        p.wait()
+    finally:
+        timer.cancel()
+    if fail: raise RuntimeError(fail)
+    if out is None:
+        err.seek(0); raise RuntimeError((err.read() or 'no result (timed out?)')[-300:])
+    return out
+
+
+def _objects(text, key):
+    """the complete {...} items so far of the JSON list `key` in `text`, a reply that may still be coming in"""
+    m = re.search(r'"%s"\s*:\s*\[' % key, text)
+    if not m: return []
+    out, depth, start, instr, esc = [], 0, 0, False, False
+    for k in range(m.end(), len(text)):
+        ch = text[k]
+        if instr:
+            if esc: esc = False
+            elif ch == '\\': esc = True
+            elif ch == '"': instr = False
+        elif ch == '"': instr = True
+        elif ch == '{':
+            if depth == 0: start = k
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                try: out.append(json.loads(text[start:k + 1]))
+                except ValueError: out.append(None)
+        elif ch == ']' and depth == 0: break
+    return out
 
 
 CASTF = os.path.expanduser('~/.config/ohaiku/cast.json')
@@ -251,28 +331,40 @@ def _rawlog(text, imgs, reply):
     except OSError: pass
 
 
-def look(imgs, cast, history, same_for=0):
+def _riff(r, names, jpeg):
+    """one riff from the reply, tidied, or None if it's no good"""
+    if not isinstance(r, dict) or r.get('who') not in names or not str(r.get('line', '')).strip(): return None
+    r = dict(r, line=str(r['line']).strip()[:90])
+    if r.get('pose') not in POSES: r['pose'] = 'giggle'
+    r['thumb'] = _crop(jpeg, r.get('box'))
+    return r
+
+
+def look(imgs, cast, history, same_for=0, on_riff=None):
     """ask Haiku about one look (the whole screen, and maybe the window in front, sharper). cast: [(name, what they
-    are)]; history: recent lines. -> dict"""
+    are)]; history: recent lines. on_riff(riff) is called for each riff the moment it has streamed in; those come
+    back marked 'shown'. -> dict"""
     import base64
     cards = characters(cast)
     text = 'Cast (use these names exactly):\n%s\n\nEarlier tonight (oldest first):\n%s\n\n%sHere is the screen now%s.' % (
-        '\n'.join('- %s (%s)%s' % (n, m, ': ' + cards[n] if cards.get(n) else '') for n, m in cast), '\n'.join(history[-10:]) or '(nothing yet: the lights just went down)',
+        '\n'.join('- %s (%s)%s' % (n, m, ': ' + cards[n] if cards.get(n) else '') for n, m in cast), '\n'.join(history[-16:]) or '(nothing yet: the lights just went down)',
         'The same thing has been up for about %d minutes.\n\n' % same_for if same_for >= 3 else '',
         ', then the window %s is looking at' % HOST if len(imgs) > 1 else '')
     size = _size(imgs[-1])
     if size: text += ' The last image is %dx%d pixels.' % size
+    names, said = {n for n, _ in cast}, []          # said: each riff so far, as it streamed in (None if no good)
+
+    def streamed(so_far):
+        for r in _objects(so_far, 'riffs')[len(said):3]:
+            said.append(_riff(r, names, imgs[-1]))
+            if said[-1] and on_riff: said[-1]['shown'] = True; on_riff(said[-1])
     out = _claude([{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': base64.b64encode(j).decode()}} for j in imgs]
-                  + [{'type': 'text', 'text': text}], SYSTEM)
+                  + [{'type': 'text', 'text': text}], SYSTEM, on_text=streamed if on_riff else None, effort=EFFORT)
     _rawlog(text, imgs, out)
     m = re.search(r'\{.*\}', out, re.S)
     d = json.loads(m.group(0)) if m else {}
-    names = {n for n, _ in cast}
-    riffs = [r for r in (d.get('riffs') or []) if isinstance(r, dict) and r.get('who') in names and str(r.get('line', '')).strip()][:2]
-    for r in riffs:
-        r['line'] = str(r['line']).strip()[:90]
-        if r.get('pose') not in POSES: r['pose'] = 'giggle'
-        r['thumb'] = _crop(imgs[-1], r.get('box'))
+    riffs = [said[i] if i < len(said) else _riff(r, names, imgs[-1]) for i, r in enumerate((d.get('riffs') or [])[:3])]
+    riffs = [r for r in riffs if r]
     pick = d.get('pick') if isinstance(d.get('pick'), dict) and str(d['pick'].get('line') or '').strip() else None
     if pick:
         box = pick.get('box')
@@ -325,7 +417,7 @@ def to_inspo(recap_text, wants):
             "screen and riff, MST3K-style. When a showing ends, Haiku writes a recap; its *Worth keeping* list lands\n"
             "here, one file per day. `wishlist.md` is what the gallery asked to keep or see more of (\"can we get the full\n"
             "video?\"): fetch what's worth it, into its own `YYYY-MM-DD author` folder in `~/claude-inspo` with a NOTES.md.\n\n"
-            "How they looked: still screenshots every ~15 s (the whole screen small, the front window sharper), no sound,\n"
+            "How they looked: still screenshots every several seconds (the whole screen small, the front window sharper), no sound,\n"
             "by Haiku. So these are first impressions from stills, not close study: check before you build on one.\n")
     m = re.search(r'Worth keeping:?\**\s*\n(.*)', recap_text or '', re.S | re.I)
     if m and m.group(1).strip():

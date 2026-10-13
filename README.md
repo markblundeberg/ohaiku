@@ -161,12 +161,14 @@ every four minutes).
 
 **The Peanut Gallery** (movie night, turbo; off unless you turn it on): `--gallery`, the tray's checkbox, or the menu.
 The free ones in the row turn their backs to you, sit down in velvet seats along the bottom of the screen, and watch
-whatever you're doing, MST3K-style. Every 15 seconds or so, and only if the screen has changed, ohaiku takes a
-screenshot, blacks out what the gallery must never see, and shows it to Haiku (`claude -p --model haiku`, through your
-own Claude Code login: no tools, no saved session, about 3 s and a tenth of a cent a look). Haiku is the puppeteer: it
-says in a line what's on screen, gives up to two of the cast a quip (a speech bubble, and a giggle, gasp, cheer, whisper
-or a popcorn handful), and now and then whispers *noted:* when something is worth keeping (an idea it sparks, a
-technique, a striking bit of art or writing). It remembers the last few looks, so it can follow a film or a thread.
+whatever you're doing, MST3K-style. It keeps an eye on a tiny grey thumbnail of the screen (twice a second, from one
+ffmpeg), and soon after the screen changes (once it settles, and at most every 6 s or so: while a video plays, that's
+about every 7 s) ohaiku takes a screenshot, blacks out what the gallery must never see, and shows it to Haiku
+(`claude -p --model haiku`, through your own Claude Code login: no tools, no saved session, low effort, about 2 to 5 s a
+look). Haiku is the puppeteer: it says in a line what's on screen, gives up to three of the cast a quip (a speech
+bubble, and a giggle, gasp, cheer, whisper or a popcorn handful; one can answer another), each shown the moment it has
+streamed in, and now and then whispers *noted:* when something is worth keeping (an idea it sparks, a technique, a
+striking bit of art or writing). It remembers the last few looks, so it can follow a film or a thread.
 
 - **Never seen**: terminals and the Claude desktop app (where the sessions live) are always blacked out, and so is any
   window whose class or title contains a line of `~/.config/ohaiku/gallery-skip.txt`. A session whose name or folder

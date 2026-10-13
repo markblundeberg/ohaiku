@@ -25,8 +25,8 @@
   ohaiku --snow       petal snow (xsnow, bloomcore edition): petals pile up on your title bars; on during Bloomcore
   ohaiku --leaves     autumn: maple, ginkgo and aspen leaves flutter down in a gusty wind that blows the drifts back off
   ohaiku --gallery    the Peanut Gallery (off unless you ask): the free ones sit in a row along the bottom with their
-                      backs to you and watch your screen. Every ~15 s, when it has changed, a screenshot (terminals and
-                      the Claude app blacked out) goes to Haiku, which voices their quips and keeps notes of anything worth
+                      backs to you and watch your screen. Soon after it changes (every ~6 s at most), a screenshot (terminals
+                      and the Claude app blacked out) goes to Haiku, which voices their quips and keeps notes of anything worth
                       keeping in ~/.local/share/ohaiku/gallery/. Click the placard to stop; again to toggle
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray, silently (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
@@ -45,7 +45,7 @@ for the menu. Middle-click the tray icon to hide or show everyone.
 
 X11 with a compositor. Every window is click-through.
 """
-import argparse, array, json, math, os, random, signal, subprocess, sys, threading, time
+import argparse, array, collections, json, math, os, random, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 SHARE = os.path.join(HERE, 'share')
@@ -69,7 +69,9 @@ TOOL_POSE = {
 }
 TOOL_PREFIX = {'mcp__': 'search'}
 WORK = {'think', 'ask', 'done', 'bash', 'read', 'search', 'edit', 'agents', 'busy', 'tea', 'dizzy'}
-GAL_EVERY = 15                                        # seconds between the Peanut Gallery's looks, at most
+GAL_GAP, GAL_IDLE = 6, 300                           # the Peanut Gallery looks soon after the screen changes, but at most
+                                                      # once every GAL_GAP s; and once in GAL_IDLE s even if nothing has
+GAL_SPACE = 2.8                                       # seconds between two of its lines
 KINDS = ['Sunflower', 'Daisy', 'Tulip', 'Rose', 'Poppy', 'Cherry', 'Cornflower', 'Marigold', 'Lotus', 'Dandelion', 'Cosmos', 'Pansy']
 SAYS = {'permission prompt': 'may I? (permission)', 'input needed': 'a question for you', 'dialog open': 'a dialog for you',
         'sandbox request': 'may I use the network?', 'worker request': 'a helper needs you', 'goal proposal': 'a goal for us?',
@@ -1192,6 +1194,7 @@ class App:
         self.bounce, self.wave, self.last_surprise, self.owl_night, self.haiku_bag = None, None, time.time(), None, []   # rare things
         self.gallery_on, self.gal_gen, self.gal_cast, self.gal_hist, self.placard = False, 0, [], [], None   # peanut gallery
         self.speeches, self.said, self.gal_skip, self.gal_hide, self.gal_why = [], {}, [], [], 'off'
+        self.gal_own, self.gal_next = [], 0.0          # ohaiku's own windows (not a change on screen); when the next line may go
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
@@ -1826,6 +1829,10 @@ class App:
         if self.tk % 6 == 0:                               # skipped sessions' own chibis and plates: blacked out too
             self.gal_hide = [(int(c.x - c.W / 2) - 4, int(c.y - c.foot) - 4, c.W + 8, c.H + 8) for c in self.agents.values()
                              if any(k in (c.agent.name + ' ' + c.agent.cwd).lower() for k in self.gal_skip)]
+        if self.tk % 6 == 3:                               # and our own windows: a new bubble isn't something new on screen
+            try: self.gal_own = [tuple(o.win.get_position()) + tuple(o.win.get_size()) for o in self.everyone() + self.speeches
+                                 + self.balloons + ([self.placard] if self.placard else []) if o.win.get_visible()]
+            except Exception: self.gal_own = []
         if self.tk % HZ == 0:
             self.gal_cast = [(n, 'Opus 5.5' if c.who.startswith('opus') else 'Haiku 5.5') for n, c in self.cast_map().items()]
         if self.placard:
@@ -1837,62 +1844,76 @@ class App:
         import gallery, world
         S = world.Surfaces()
         W, H = S.d.screen().width_in_pixels, S.d.screen().height_in_pixels
-        last_thumb, last_sent, hist, wait = None, 0.0, self.gal_hist, GAL_EVERY
+        watch = gallery.Watch(W, H)                 # a tiny grey thumbnail of the screen, twice a second
+        last_thumb, last_sent, hist, wait = None, 0.0, self.gal_hist, GAL_GAP
+        recent = collections.deque(maxlen=3)        # the last few thumbnails (to tell when the screen has settled)
+        moved = None                                # since when the screen has looked different from the last look
+        soon = False                                # look as soon as we may (the page they asked about has gone)
         wants, log = [], []
         showing, since = None, time.time()          # what's in front (window and title), and since when
         pick_on = None                              # what was in front when they asked for something
         live = lambda: self.gallery_on and self.gal_gen == gen
-        while live():
-            time.sleep(1)
-            why = ('hidden' if self.hidden else 'screen locked' if self.locked else 'studying' if self.studying is not None
-                   else 'nobody free to watch' if not self.gal_cast else None)
-            if why: self.gal_why = why; continue
-            if pick_on is not None:                 # their request goes the moment the page changes, and they look again soon
+        try:
+            while live():
+                time.sleep(.5)
+                why = ('hidden' if self.hidden else 'screen locked' if self.locked else 'studying' if self.studying is not None
+                       else 'nobody free to watch' if not self.gal_cast else None)
+                if why: self.gal_why = why; continue
+                if not watch.alive(): watch = gallery.Watch(W, H)
+                th = watch.frame()
+                if th is None: continue
                 try:
-                    act = S.active(); now_on = next(((w[0], w[6]) for w in S.windows() if w[0] == act), None)
-                except Exception: now_on = pick_on
-                if now_on != pick_on:
-                    pick_on = None; GLib.idle_add(lambda: (self.drop_pick(), False)[1])
-                    last_sent = min(last_sent, time.time() - wait + 3)
-            if time.time() - last_sent < wait: continue
-            try:
-                wins, act = S.windows(), S.active()
+                    wins, act = S.windows(), S.active()
+                except Exception: continue
                 now_on = next(((w[0], w[6]) for w in wins if w[0] == act), None)
                 if now_on != showing: showing, since = now_on, time.time()
-                imgs, th = gallery.capture(W, H, gallery.private_rects(wins) + list(self.gal_hide), gallery.focus_rect(wins, act, W, H))
-            except Exception as e:
-                print('ohaiku: gallery capture:', e, file=sys.stderr); last_sent, wait = time.time(), 60
-                self.gal_why = 'screenshot failed: %s' % str(e)[:80]; continue
-            if gallery.changed(th, last_thumb) < 2.0 and time.time() - last_sent < 300:      # nothing new on screen
-                self.gal_why = 'watching (nothing new on screen)'; continue
-            last_thumb, last_sent, wait = th, time.time(), GAL_EVERY
-            self.gal_why = 'looking...'
-            GLib.idle_add(lambda: (self.placard and setattr(self.placard, 'blink', 1.0), False)[1])
-            try:
-                res = gallery.look(imgs, list(self.gal_cast), hist, int((time.time() - since) / 60))
-            except Exception as e:
-                print('ohaiku: gallery:', e, file=sys.stderr); wait = 60
-                self.gal_why = 'Haiku call failed: %s' % str(e)[:80]; continue
-            if not live(): break
-            pick_on = showing if res.get('pick') else None
-            self.gal_why, self.gal_looks = 'watching (last look %s)' % time.strftime('%H:%M:%S'), getattr(self, 'gal_looks', 0) + 1
-            hist.append('%s seen: %s' % (time.strftime('%H:%M'), res['seen']) + ''.join(' | %s: "%s"' % (r['who'], r['line']) for r in res['riffs'])
-                        + (' | noted: %s' % res['note'] if res['note'] else '') + (' | wished for: %s' % res['want']['what'] if res['want'] else '')
-                        + (' | asked to watch: %s' % res['pick']['title'] if res.get('pick') else ''))
-            if res['want']: wants.append(res['want'])
-            log.append(hist[-1] + (' | detail: %s' % res['detail'] if res['detail'] else ''))
-            try:
-                shot = ''
-                if res['note'] or res['want']:                # keep the look itself (redacted) when it was worth a note
-                    shot = '\n\n![](%s)' % gallery.keep(imgs[-1])
-                gallery.write('**%s** %s' % (time.strftime('%H:%M'), res['seen']) + ('\n\n%s' % res['detail'] if res['detail'] else '')
-                              + ''.join('\n> **%s:** %s' % (r['who'], r['line']) for r in res['riffs'])
-                              + ('\n\n\u25b6 **%s** asks for *%s*: %s' % (res['pick']['who'] or 'someone', res['pick']['title'], res['pick']['line']) if res.get('pick') else '')
-                              + ('\n\n\u270e %s' % res['note'] if res['note'] else '')
-                              + ('\n\n\u2606 wish: %s (%s)%s' % (res['want']['what'], res['want']['why'], ' \u2014 ' + res['want']['where'] if res['want']['where'] else '') if res['want'] else '')
-                              + shot)
-            except OSError: pass
-            GLib.idle_add(self.gallery_result, res)
+                if pick_on is not None and now_on != pick_on:      # their request goes the moment the page changes
+                    pick_on, soon = None, True; GLib.idle_add(lambda: (self.drop_pick(), False)[1])
+                hide = gallery.private_rects(wins) + list(self.gal_hide) + list(self.gal_own)
+                d = gallery.changed(th, last_thumb, hide, W, H)
+                still = len(recent) == recent.maxlen and gallery.changed(th, recent[0], hide, W, H) < 1.0
+                recent.append(th)
+                if d < 2.0: moved = None
+                elif moved is None: moved = time.time()
+                if time.time() - last_sent < wait: continue
+                if not (soon or time.time() - last_sent > GAL_IDLE or (moved and (still or time.time() - moved > 2.5))):
+                    self.gal_why = 'watching (%s)' % ('waiting for the screen to settle' if moved else 'nothing new on screen'); continue
+                try:
+                    imgs, _ = gallery.capture(W, H, gallery.private_rects(wins) + list(self.gal_hide), gallery.focus_rect(wins, act, W, H))
+                except Exception as e:
+                    print('ohaiku: gallery capture:', e, file=sys.stderr); last_sent, wait = time.time(), 60
+                    self.gal_why = 'screenshot failed: %s' % str(e)[:80]; continue
+                last_thumb, last_sent, wait, moved, soon = th, time.time(), GAL_GAP, None, False
+                self.gal_why = 'looking...'
+                GLib.idle_add(lambda: (self.placard and setattr(self.placard, 'blink', 1.0), False)[1])
+                try:
+                    res = gallery.look(imgs, list(self.gal_cast), hist, int((time.time() - since) / 60),
+                                       on_riff=lambda r: GLib.idle_add(self.gallery_riff, r, gen))
+                except Exception as e:
+                    print('ohaiku: gallery:', e, file=sys.stderr); wait = 60
+                    self.gal_why = 'Haiku call failed: %s' % str(e)[:80]; continue
+                if not live(): break
+                pick_on = showing if res.get('pick') else None
+                self.gal_why, self.gal_looks = 'watching (last look %s)' % time.strftime('%H:%M:%S'), getattr(self, 'gal_looks', 0) + 1
+                hist.append('%s seen: %s' % (time.strftime('%H:%M'), res['seen']) + ''.join(' | %s: "%s"' % (r['who'], r['line']) for r in res['riffs'])
+                            + (' | noted: %s' % res['note'] if res['note'] else '') + (' | wished for: %s' % res['want']['what'] if res['want'] else '')
+                            + (' | asked to watch: %s' % res['pick']['title'] if res.get('pick') else ''))
+                if res['want']: wants.append(res['want'])
+                log.append(hist[-1] + (' | detail: %s' % res['detail'] if res['detail'] else ''))
+                try:
+                    shot = ''
+                    if res['note'] or res['want']:                # keep the look itself (redacted) when it was worth a note
+                        shot = '\n\n![](%s)' % gallery.keep(imgs[-1])
+                    gallery.write('**%s** %s' % (time.strftime('%H:%M'), res['seen']) + ('\n\n%s' % res['detail'] if res['detail'] else '')
+                                  + ''.join('\n> **%s:** %s' % (r['who'], r['line']) for r in res['riffs'])
+                                  + ('\n\n\u25b6 **%s** asks for *%s*: %s' % (res['pick']['who'] or 'someone', res['pick']['title'], res['pick']['line']) if res.get('pick') else '')
+                                  + ('\n\n\u270e %s' % res['note'] if res['note'] else '')
+                                  + ('\n\n\u2606 wish: %s (%s)%s' % (res['want']['what'], res['want']['why'], ' \u2014 ' + res['want']['where'] if res['want']['where'] else '') if res['want'] else '')
+                                  + shot)
+                except OSError: pass
+                GLib.idle_add(self.gallery_result, res)
+        finally:
+            watch.close()
         if self.gal_gen == gen + 1 and not self.gallery_on and len(log) >= 3:       # turned off (not quit): a recap for the notebook
             try:
                 rc = gallery.recap(log)
@@ -1900,23 +1921,37 @@ class App:
                 gallery.to_inspo(rc, gallery.pick_wishes(wants))
             except Exception as e: print('ohaiku: gallery recap:', e, file=sys.stderr)
 
+    def gal_say(self, c, pose, line, thumb=None, pick=False, stale=None):
+        """a line from the gallery, in turn: GAL_SPACE s after the one before. A riff that would have to wait more than
+        `stale` s is dropped (the screen has moved on)"""
+        now = time.time(); t = max(now, self.gal_next)
+        if stale is not None and t - now > stale: return
+        self.gal_next = t + GAL_SPACE
+        if pick:
+            g = getattr(self, 'pick_gen', 0)
+            GLib.timeout_add(int((t - now) * 1000) + 1, lambda: self.riff(c, pose, line, True, thumb) if getattr(self, 'pick_gen', 0) == g else False)
+        else: GLib.timeout_add(int((t - now) * 1000) + 1, self.riff, c, pose, line, False, thumb)
+
+    def gallery_riff(self, r, gen):
+        """a riff the moment it has streamed in"""
+        if self.gal_gen != gen or not self.gallery_on: return False
+        self.drop_pick()
+        c = self.cast_map().get(r['who'])
+        if c: self.gal_say(c, r['pose'], r['line'], r.get('thumb'), stale=6)
+        return False
+
     def gallery_result(self, res):
         self.drop_pick()
         cast = self.cast_map()
-        for i, r in enumerate(res['riffs']):
-            c = cast.get(r['who'])
-            if c: GLib.timeout_add(int(i * 2800) + 1, self.riff, c, r['pose'], r['line'], False, r.get('thumb'))
-        t = len(res['riffs']) * 2800 + 400
+        for r in res['riffs']:
+            if not r.get('shown') and cast.get(r['who']): self.gal_say(cast[r['who']], r['pose'], r['line'], r.get('thumb'), stale=6)
         if res['want'] and cast:                    # say the wish out loud, so Mark hears what they'd love to see
-            c = random.choice(list(cast.values()))
-            GLib.timeout_add(t, self.riff, c, 'cheer', 'can we get ' + clip(res['want']['what'], 80) + '?'); t += 2800
+            self.gal_say(random.choice(list(cast.values())), 'cheer', 'can we get ' + clip(res['want']['what'], 80) + '?')
         if res['note'] and cast:
-            c = random.choice(list(cast.values()))
-            GLib.timeout_add(t, self.riff, c, 'whisper', 'noted: ' + clip(res['note'], 84)); t += 2800
+            self.gal_say(random.choice(list(cast.values())), 'whisper', 'noted: ' + clip(res['note'], 84))
         if res.get('pick') and cast:                 # their request: stays up until the screen changes
             c = cast.get(res['pick']['who']) or random.choice(list(cast.values()))
-            g = getattr(self, 'pick_gen', 0)
-            GLib.timeout_add(t, lambda: self.riff(c, 'cheer', res['pick']['line'], True, res['pick'].get('thumb')) if getattr(self, 'pick_gen', 0) == g else False)
+            self.gal_say(c, 'cheer', res['pick']['line'], res['pick'].get('thumb'), pick=True)
         return False
 
     def riff(self, c, pose, line, pick=False, thumb=None):
