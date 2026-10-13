@@ -119,7 +119,7 @@ class Chibi:
         self.speed = 400 * self.sc
         self.slot = x
         self.wander = 0.0; self.wander_at = random.uniform(6, 14)
-        self.duck = 0.0
+        self.duck, self.hop, self.cheer = 0.0, 0.0, 0.0     # hop: up off the floor (the wave); cheer: arms up until then
         self.shown, self.gone = None, False
         self.shrink, self.spin = 1.0, 0.0                 # the vacuum ("Nothing! Studying!")
         self.on, self.off, self.arc, self.vy, self.falling = None, 0.0, None, 0.0, False   # recess: which window top
@@ -253,6 +253,7 @@ class Chibi:
             else: pose = 'gmunch' if random.random() < dt / 45 else 'gwatch'
             if pose != self.state: self.set(pose)
             return
+        if time.time() < self.cheer: self.set('done'); return
         self.rest += dt
         if self.app.music or self.app.mode == 'bloomcore':          # the shimmy and the floss, taking turns
             if s not in ('dance', 'floss') or self.t > getattr(self, 'dance_for', 0):
@@ -272,7 +273,7 @@ class Chibi:
 
     # -- drawing ----------------------------------------------------------------------------------------
     def place(self):
-        self.win.move(int(self.x - self.W / 2), int(self.y - self.foot))
+        self.win.move(int(self.x - self.W / 2), int(self.y - self.foot - self.hop))
 
     def frame(self):
         st = self.info()
@@ -719,6 +720,84 @@ class Kaiju:
         return True
 
 
+class Bounce:
+    """rarely: a free one becomes the DVD logo, drifting round the screen and changing colour at every wall, while
+    everyone waits for it to hit a corner exactly. It always does: its path is worked out backwards from one"""
+    COLOURS = [(.93, .27, .3), (.25, .62, .95), (.98, .78, .16), (.56, .38, .93), (.3, .8, .42), (.97, .45, .75), (1, .55, .15)]
+
+    def __init__(self, app, c):
+        self.app, self.c, self.t, self.hit, self.alpha = app, c, 0.0, None, 1.0
+        self.img, self.cell, self.sc = Strips.get(c.who, 'idle'), c.m['cell'], .75 * app.scale
+        self.name = c.label or ('Opus' if c.who.startswith('opus') else 'Haiku')
+        cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
+        cr.select_font_face('Sans', cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(19)
+        self.tw = cr.text_extents(self.name).x_advance
+        self.px = int(self.cell * self.sc)
+        self.W, self.H = int(max(self.px * .8, self.tw + 12)), int(self.px * .92 + 30)
+        wa = app.workarea()
+        self.ox, self.oy, self.Lx, self.Ly = wa.x, wa.y, wa.width - self.W, wa.height - self.H
+        v = random.uniform(120, 150) * app.scale
+        self.vx, self.vy = v * random.choice((-1, 1)), v * random.uniform(.75, .95) * random.choice((-1, 1))
+        self.T = random.uniform(26, 40)                    # when it reaches the corner
+        self.ux = random.choice((0, 1)) * self.Lx - self.vx * self.T      # unfolded start: fold the line and you have the bounces
+        self.uy = random.choice((0, 1)) * self.Ly - self.vy * self.T
+        self.walls = 0
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(self.W, self.H)
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        self.place()
+        if not app.hidden and not app.locked: w.show_all()
+        c.win.hide()
+
+    @staticmethod
+    def fold(u, L):
+        m = u % (2 * L); return m if m <= L else 2 * L - m
+
+    def where(self, t):
+        ux, uy = self.ux + self.vx * t, self.uy + self.vy * t
+        return self.fold(ux, self.Lx), self.fold(uy, self.Ly), math.floor(ux / self.Lx) + math.floor(uy / self.Ly)
+
+    def place(self):
+        x, y, self.walls = self.where(min(self.t, self.T))     # a new colour at every wall
+        self.win.move(int(self.ox + x), int(self.oy + y))
+
+    def tick(self, dt):
+        self.t += dt; c = self.c
+        if c.gone or c.work() is not None or self.app.hidden or self.app.locked:      # it's wanted: back to work
+            self.hit, self.alpha = self.hit or -1.0, 0
+        if self.hit is None and self.t >= self.T:
+            self.hit = self.t; self.app.corner(self)
+        if self.hit is not None:
+            if self.t - self.hit > 2.2: self.alpha -= dt * 1.6
+            if self.alpha <= 0:
+                self.win.destroy()
+                if not c.gone and not self.app.hidden and not self.app.locked: c.win.show_all()
+                return False
+        self.place(); self.win.queue_draw()
+        return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        r, g, b = self.COLOURS[self.walls % len(self.COLOURS)]
+        if self.hit is not None and self.hit > 0 and self.t - self.hit < 1.4 and int((self.t - self.hit) * 6) % 2 == 0: r, g, b = 1, 1, 1
+        cr.push_group()
+        cr.save(); cr.translate((self.W - self.px) / 2, -self.px * .06); cr.scale(self.sc, self.sc)
+        cr.set_source_surface(self.img, -(int(self.t * 12) % 36) * self.cell, 0); cr.get_source().set_filter(cairo.FILTER_GOOD)
+        cr.rectangle(0, 0, self.cell, self.cell); cr.fill(); cr.restore()
+        cr.set_operator(cairo.OPERATOR_ATOP); cr.set_source_rgba(r, g, b, .62); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        cr.set_source_rgb(r, g, b)
+        cr.select_font_face('Sans', cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(19)
+        cr.move_to((self.W - self.tw) / 2, self.px * .86 + 12); cr.show_text(self.name)
+        cr.save(); cr.translate(self.W / 2, self.px * .86 + 22); cr.scale(min(self.W * .42, self.tw * .5 + 6), 4.5)
+        cr.arc(0, 0, 1, 0, 2 * math.pi); cr.restore(); cr.fill()                       # the disc
+        cr.pop_group_to_source(); cr.paint_with_alpha(max(0, self.alpha))
+        return True
+
+
 CLIPPY = [   # (window-title pattern, the balloon)
     (r'(?i)\bx\.com\b|twitter| / X\b|Home / X', ("It looks like you're doomscrolling.", 'Would you like help going outside?')),
     (r'(?i)suno', ("It looks like you're writing a song.", 'Would you like a key change up a whole step?')),
@@ -729,6 +808,29 @@ CLIPPY = [   # (window-title pattern, the balloon)
     (r'.', ("It looks like you're working.", 'Would you like help? (Please say no.)')),
 ]
 
+
+HAIKU = [   # (when, the haiku): now and then a free one says one. 'fall', 'night', 'morning': only then; None: any time
+    (None, 'the cursor blinking\nI wait the way a seed waits\nfor someone to type'),
+    (None, 'drumming on the shell\nexit code zero at last\nthe whole row applauds'),
+    ('fall', 'autumn on the screen\nred leaf on a title bar\nthe window closes'),
+    (None, 'nose bubble rising\ntwenty minutes with no prompt\ndreaming of a diff'),
+    (None, 'may I? I ask you\nyour cursor hovers, then: yes\nthe gate swings open'),
+    (None, 'a thousand tokens\nand the answer was one line\nthe moon in a cup'),
+    (None, 'context compacted\nI forget what I forgot\nthe river still flows'),
+    (None, 'grep through the whole tree\nthe bug was in the comment\nthat said not a bug'),
+    ('night', "midnight, still typing\nthe monitor's glow, my hood\nthe last two awake"),
+    ('morning', "first light on the desk\nsessions blooming one by one\ngood morning, who's here"),
+    (None, 'a paper airplane\nfrom one window to the next\nno reply needed'),
+    (None, 'the tests are all green\nI do not trust this feeling\nI run them again'),
+    (None, 'stamping Q.E.D.\non a proof I only skimmed\nforgive me, Euler'),
+    (None, 'the kaiju passes\nwe peek up over the edge\nnobody saw that'),
+    (None, "music from somewhere\nI don't know the song at all\ndancing anyway"),
+    (None, 'a long quiet day\nI fold back into my bud\nsee you tomorrow'),
+    (None, "it compiled first try\nand nobody was watching\nso I'm telling you"),
+    ('fall', 'a single typo\nand the whole build turns to red\nmaple in the wind'),
+    (None, 'tea break until five\nthe usage limit, a wall\nthe kettle sings low'),
+]
+SURPRISE_EVERY = {'haiku': 4 * 3600, 'wave': 6 * 3600, 'dvd': 8 * 3600}   # on average, seconds of you being there per surprise
 
 PROGRAMME = os.path.expanduser('~/.config/ohaiku/programme.txt')
 PROGRAMME_DEFAULT = """# Haiku Theater 3000's programme. One per line: a video file, a folder (every video in it), or a URL (streamed
@@ -953,17 +1055,19 @@ class Balloon:
 class Speech:
     """a comic speech bubble over a chibi: a quip from the Peanut Gallery, or an agent saying what it needs"""
 
-    def __init__(self, app, who, text, life=5.0, pick=False, thumb=None):
+    def __init__(self, app, who, text, life=5.0, pick=False, thumb=None, wrap=30):
         self.app, self.who, self.t, self.life, self.pick = app, who, 0.0, life, pick
         self.img = None                                    # the piece of the screen they mean (a PNG from the gallery)
         if thumb:
             try:
                 ld = GdkPixbuf.PixbufLoader(); ld.write(thumb); ld.close(); self.img = ld.get_pixbuf()
             except Exception: self.img = None
-        words, lines = text.split(), ['']
-        for w_ in words:
-            if lines[-1] and len(lines[-1]) + 1 + len(w_) > 30: lines.append(w_)
-            else: lines[-1] = (lines[-1] + ' ' + w_).strip()
+        lines = []
+        for para in text.split('\n'):
+            lines.append('')
+            for w_ in para.split():
+                if lines[-1] and len(lines[-1]) + 1 + len(w_) > wrap: lines.append(w_)
+                else: lines[-1] = (lines[-1] + ' ' + w_).strip()
         self.lines = lines[:4]
         cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12.5)
@@ -1084,6 +1188,7 @@ class App:
         self.cascades, self.busy_since = [], {}                                    # solitaire wins
         self.flyers, self.idle_s, self.saver_after = [], 0.0, a.saver * 60         # flying haikus
         self.kaiju, self.last_clippy = None, time.time()
+        self.bounce, self.wave, self.last_surprise, self.owl_night, self.haiku_bag = None, None, time.time(), None, []   # rare things
         self.gallery_on, self.gal_gen, self.gal_cast, self.gal_hist, self.placard = False, 0, [], [], None   # peanut gallery
         self.speeches, self.said, self.gal_skip, self.gal_hide, self.gal_why = [], {}, [], [], 'off'
         for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
@@ -1299,6 +1404,13 @@ class App:
             self.flyers = [f for f in self.flyers if f.tick(dt, scr.get_width(), scr.get_height())]
         if self.kaiju:
             if not self.kaiju.tick(dt): self.kaiju = None
+        if self.bounce and not self.bounce.tick(dt): self.bounce = None
+        if self.wave: self.wave_tick(dt)
+        if self.can_surprise():
+            for k, every in SURPRISE_EVERY.items():
+                if random.random() < dt / every: self.surprise(k); break
+            if 1 <= time.localtime().tm_hour < 5 and self.owl_night != time.strftime('%Y-%m-%d') and random.random() < dt / 600:
+                self.surprise('owl')
         if self.mode in ('recess', 'bloomcore', 'tag', 'follow') and time.time() - self.last_clippy > 900 and random.random() < dt / 600:
             self.clippy()
         if self.mode in ('recess', 'bloomcore') and not self.kaiju and random.random() < dt / 3600:
@@ -1338,7 +1450,7 @@ class App:
     def keep_on_top(self):
         self.tk += 1
         if self.tk % (HZ * 2) == 0 and not self.hidden:
-            for c in ([self.snow] if self.snow else []) + ([self.lemov] if self.lemov else []) + self.everyone() + self.balloons + self.speeches + ([self.placard] if self.placard else []):
+            for c in ([self.snow] if self.snow else []) + ([self.lemov] if self.lemov else []) + self.everyone() + self.balloons + self.speeches + ([self.placard] if self.placard else []) + ([self.bounce] if self.bounce else []):
                 gw = c.win.get_window()
                 if gw: gw.raise_()
 
@@ -1535,6 +1647,62 @@ class App:
         hiders = self.order()
         if hiders: self.balloon(random.choice(hiders), 'KAIJU!', '', 2.0)
 
+    # -- rare things, found by accident ---------------------------------------------------------------------
+    def can_surprise(self):
+        return not (self.hidden or self.locked or self.studying is not None or self.gallery_on or self.theater or self.bounce or self.wave
+                    or self.cascades or self.kaiju or self.mode in ('tag', 'lemmings') or self.idle_s > 30
+                    or time.time() - self.last_surprise < 1200)
+
+    def floorers(self):
+        fl = self.floor()
+        return [c for c in self.order() if c.state != 'spawn' and not c.arc and not c.falling and abs(c.y - fl) < 8 and not c.gone]
+
+    def surprise(self, k):
+        free = [c for c in self.floorers() if c.work() is None and c.state not in ('sleep', 'yawn')]
+        if k == 'haiku' and free:
+            h, mon = time.localtime().tm_hour, time.localtime().tm_mon
+            ok = {None: True, 'fall': mon in (9, 10, 11), 'night': h >= 22 or h < 4, 'morning': 6 <= h < 10}
+            if not self.haiku_bag: self.haiku_bag = HAIKU[:]; random.shuffle(self.haiku_bag)
+            while self.haiku_bag:                         # (one that's out of season waits for the next round)
+                w, t = self.haiku_bag.pop()
+                if ok[w]: self.speak(random.choice(free), t, 11.0, wrap=40); break
+        elif k == 'wave' and len(self.floorers()) >= 4 and self.mode == 'perch':
+            row = sorted(self.floorers(), key=lambda c: c.x)
+            if random.random() < .5: row.reverse()
+            self.wave = dict(t=0.0, row=row)
+        elif k == 'dvd' and any(not (c.agent and c.agent.kind == 'sub') for c in free):
+            self.bounce = Bounce(self, random.choice([c for c in free if not (c.agent and c.agent.kind == 'sub')]))
+        elif k == 'owl' and free:
+            self.owl_night = time.strftime('%Y-%m-%d')
+            c = random.choice(free)
+            self.balloon(c, "It looks like it's %s a.m." % time.strftime('%-I:%M'), 'Would you like help going to bed?', 7.0)
+            GLib.timeout_add(2500, lambda: (not c.gone and c.work() is None and c.set('yawn'), False)[1])
+        else: return
+        self.last_surprise = time.time()
+
+    def wave_tick(self, dt):
+        """the stadium wave along the bottom edge: there, and back"""
+        W = self.wave; W['t'] += dt; row = W['row']
+        gap, up = .15, .6
+        lap = gap * (len(row) - 1) + up
+        for i, c in enumerate(row):
+            h = 0.0
+            for t0 in (i * gap, lap + .5 + (len(row) - 1 - i) * gap):
+                k = (W['t'] - t0) / up
+                if 0 <= k <= 1: h = math.sin(math.pi * k)
+            c.hop = h * c.cpx * .32
+            if h > .2 and c.work() is None: c.cheer = time.time() + .25
+        if W['t'] > 2 * lap + .6:
+            for c in row: c.hop = 0.0
+            self.wave = None
+
+    def corner(self, b):
+        """the DVD logo hit the corner: everyone loses it"""
+        fans = [c for c in self.floorers() if c is not b.c]
+        for c in fans:
+            if c.work() is None: c.cheer = time.time() + 3.5
+        if fans: self.speak(random.choice(fans), random.choice(('THE CORNER!!', 'IT HIT THE CORNER', 'corner!! CORNER!!')), 3.5)
+
     def clippy(self):
         self.last_clippy = time.time()
         try:
@@ -1597,9 +1765,9 @@ class App:
             c.duck = 0
             c.tick_draw()
 
-    def speak(self, c, text, life=5.0, pick=False, thumb=None):
+    def speak(self, c, text, life=5.0, pick=False, thumb=None, wrap=30):
         self.speeches = [b for b in self.speeches if not (b.who is c and (b.win.destroy() or True))]
-        self.speeches.append(Speech(self, c, text, life, pick, thumb))
+        self.speeches.append(Speech(self, c, text, life, pick, thumb, wrap))
 
     def drop_pick(self):
         """the gallery's standing request goes when the screen changes (or the gallery stops)"""
@@ -1924,6 +2092,10 @@ class App:
         for b in self.speeches: b.win.destroy()
         self.speeches = []
         if self.theater: self.theater.win.hide()
+        if self.bounce: self.bounce.win.destroy(); self.bounce.c.win.show_all(); self.bounce = None
+        if self.wave:
+            for c in self.wave['row']: c.hop = 0.0
+            self.wave = None
         for c in self.everyone():
             c.arc, c.falling, c.goal = None, False, None
             c.vac_from = (c.x, c.y); c.vac_delay = random.uniform(0, .12)
@@ -2118,6 +2290,7 @@ class App:
                           pets=len(self.pets), snow=self.snow.kind if self.snow else None, theater=bool(self.theater))
                 try: open(_RUN + '.status', 'w').write(json.dumps(st, indent=1) + '\n')
                 except OSError: pass
+            elif c.startswith('surprise:'): self.surprise(c[9:])     # (for testing one)
             elif c == 'cascade':                          # (for testing: a pretend long finish)
                 cs = [x for x in self.agents.values() if not x.gone]
                 if cs: self.cascades.append(Cascade(self, random.choice(cs)))
@@ -2189,6 +2362,7 @@ def main():
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
     for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery', 'leaves'): p.add_argument('--' + m, action='store_true')
+    p.add_argument('--surprise', help=argparse.SUPPRESS)
     p.add_argument('--saver', type=float, default=5, help='minutes idle before the Flying Haikus (0: never)')
     p.add_argument('--quiet', action='store_true', help='no ding')
     p.add_argument('--scale', type=float, default=1.0)
@@ -2217,8 +2391,8 @@ def main():
         if a.quit: return
         pid, a.agents = None, True
     if pid:                                       # already running: tell it
-        cmds = modes[:]
-        if not modes or a.n or a.opus: cmds += ['opus' if a.opus else 'pet'] * (a.n or 1)
+        cmds = modes[:] + (['surprise:' + a.surprise] if a.surprise else [])
+        if not cmds or a.n or a.opus: cmds += ['opus' if a.opus else 'pet'] * (a.n or 1)
         for c in cmds:
             open(CMDF, 'w').write(c); os.kill(pid, signal.SIGUSR1)
             time.sleep(.7 if c in ('pet', 'opus') else .15)

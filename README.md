@@ -139,6 +139,9 @@ menu to call them up.
 **Solitaire win**: when an agent finishes a stretch of work longer than eight minutes, its chibi bounces off across the
 screen leaving a copy of itself every frame, like Windows Solitaire's win cascade; then the trail fades and it's back.
 
+**And a few rarer things**, which are better come across by accident than read about here. (For testing one:
+`./ohaiku --surprise NAME`; the names are in the code.)
+
 **Kaiju**: chibi Opus at five times the size stomps along the bottom of the screen and everyone ducks below the edge.
 `--kaiju`, the menu, or, very rarely, by itself during Recess and Bloomcore.
 
