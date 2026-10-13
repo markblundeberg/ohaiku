@@ -60,7 +60,7 @@ what it's doing:
 | Grep, Glob, WebSearch, ToolSearch, MCP tools | the magnifying glass |
 | Edit, Write | stamping Q.E.D. on the book |
 | Bash, Monitor | the drum |
-| Agent, Workflow, SendMessage | tossing seed packets; the subagents appear beside it, smaller, and leave when they finish |
+| Agent, Workflow, SendMessage, SendUserFile | tossing seed packets; the subagents appear beside it, smaller, and leave when they finish |
 | AskUserQuestion, ExitPlanMode, PushNotification | waving a "?" — it wants you (blue name plate) |
 | waiting at a permission prompt or a dialog | the same, saying so: *may I? (permission)*, *a question for you*, *a dialog for you*... |
 | hit a usage limit | a tea break, until the limit resets (*tea break: back at 5:30pm*; lavender plate) |

@@ -62,7 +62,8 @@ TOOL_POSE = {
     'Read': 'read', 'NotebookRead': 'read', 'WebFetch': 'read', 'Skill': 'read', 'ReadNotifications': 'read',
     'Grep': 'search', 'Glob': 'search', 'WebSearch': 'search', 'ToolSearch': 'search', 'ListAgents': 'search',
     'Edit': 'edit', 'Write': 'edit', 'MultiEdit': 'edit', 'NotebookEdit': 'edit', 'Artifact': 'edit',
-    'Agent': 'agents', 'Task': 'agents', 'Workflow': 'agents', 'SendMessage': 'agents',
+    'Agent': 'agents', 'Task': 'agents', 'Workflow': 'agents', 'SendMessage': 'agents', 'SendUserFile': 'agents',
+    'SubagentHandback': 'done',
     'TodoWrite': 'think', 'EnterPlanMode': 'think',
     'AskUserQuestion': 'ask', 'ExitPlanMode': 'ask', 'PushNotification': 'ask',
 }
@@ -189,8 +190,8 @@ class Chibi:
         if a.state == 'tool':
             p = TOOL_POSE.get(a.tool)
             if p is None:
-                p = next((v for k, v in TOOL_PREFIX.items() if (a.tool or '').startswith(k)), 'busy')
-                self.app.note_unknown(a.tool)
+                p = next((v for k, v in TOOL_PREFIX.items() if (a.tool or '').startswith(k)), None)
+                if p is None: p = 'busy'; self.app.note_unknown(a.tool)
             return p
         return None                                             # free
 
