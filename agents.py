@@ -256,7 +256,8 @@ def scan(within=2 * 3600, now=None):
             except OSError: continue
             sage = now - smt
             sst, stool = q['state'], q['tool']
-            if sst == 'think' and sage > 12 and q['last_tool']: sst, stool = 'tool', q['last_tool']
+            if q['last_tool'] == 'SubagentHandback': sst = 'free'          # its final call; no end_turn follows
+            elif sst == 'think' and sage > 12 and q['last_tool']: sst, stool = 'tool', q['last_tool']
             if sst == 'free':
                 if sage > 8: continue
                 sst = 'done'
