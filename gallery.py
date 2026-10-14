@@ -278,7 +278,8 @@ def characters(cast):
     editable) in ~/.config/ohaiku/cast.json, so they're the same people every show. cast: [(name, model)] -> {name: card}"""
     try: cards = json.load(open(CASTF))
     except (OSError, ValueError): cards = {}
-    new = [(n, m) for n, m in cast if not cards.get(n)]
+    key = lambda n: n if cards.get(n) else re.sub(r'[^\w\s.\'-]', '', n).strip() or n    # 'driftlet🪶' keeps driftlet's card
+    new = [(n, m) for n, m in cast if not cards.get(key(n))]
     if new:
         try:
             out = _claude([{'type': 'text', 'text':
@@ -293,11 +294,11 @@ def characters(cast):
                 'You write character cards for a cast of tiny desktop gremlins. Be specific and playful.')
             got = json.loads(re.search(r'\{.*\}', out, re.S).group(0))
             for n, _ in new:
-                if isinstance(got.get(n), str) and got[n].strip(): cards[n] = got[n].strip()[:500]
+                if isinstance(got.get(n), str) and got[n].strip(): cards[key(n)] = got[n].strip()[:500]
             os.makedirs(os.path.dirname(CASTF), exist_ok=True)
             json.dump(cards, open(CASTF, 'w'), indent=1, ensure_ascii=False)
         except Exception: pass                          # no cards this time: they just play it by ear
-    return {n: cards.get(n, '') for n, _ in cast}
+    return {n: cards.get(key(n), '') for n, _ in cast}
 
 
 def _size(jpeg):

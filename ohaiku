@@ -93,6 +93,29 @@ def clip(s, n):
     return s if len(s) <= n else s[:n - 1].rsplit(' ', 1)[0].rstrip(',;:.') + '\u2026'
 
 
+def _layout(cr, s):
+    """s in cr's current (toy) font, as a Pango layout: Pango falls back to other fonts for what that one lacks (emoji
+    in a session's name, symbols, CJK), where cairo's toy show_text draws an empty box"""
+    f, d = cr.get_font_face(), Pango.FontDescription()
+    d.set_family(f.get_family() if isinstance(f, cairo.ToyFontFace) else 'Sans')
+    if isinstance(f, cairo.ToyFontFace) and f.get_weight() == cairo.FONT_WEIGHT_BOLD: d.set_weight(Pango.Weight.BOLD)
+    if isinstance(f, cairo.ToyFontFace) and f.get_slant() == cairo.FONT_SLANT_ITALIC: d.set_style(Pango.Style.ITALIC)
+    d.set_absolute_size(cr.get_font_matrix().xx * Pango.SCALE)
+    L = PangoCairo.create_layout(cr); L.set_font_description(d); L.set_text(s, -1)
+    return L
+
+
+def text_w(cr, s):
+    """how wide s is in cr's current font (text_w(cr, s), with font fallback)"""
+    return _layout(cr, s).get_extents()[1].width / Pango.SCALE
+
+
+def show_text(cr, s):
+    """show_text(cr, s), with font fallback: s sits on the baseline at the current point"""
+    L = _layout(cr, s); x, y = cr.get_current_point()
+    cr.move_to(x, y - L.get_baseline() / Pango.SCALE); PangoCairo.show_layout(cr, L)
+
+
 class Strips:
     meta, surf = None, {}
 
@@ -154,11 +177,12 @@ class Chibi:
         cr.set_font_size(fs)
         txt = self.label if len(self.label) <= 18 else self.label[:17] + '…'
         pad = 15 if (self.agent and self.agent.kind == 'session') else 0      # room for the day's flower
-        e = cr.text_extents(txt)
-        while e.x_advance + 12 + pad > self.W - 2 and len(txt) > 4:
-            txt = txt[:-2] + '…'; e = cr.text_extents(txt)
-        pw, ph = e.x_advance + 12 + pad, LABEL_H - 3
-        self._plate = dict(txt=txt, fs=fs, tw=e.x_advance, th=e.height, x=(self.W - pw) / 2, y=self.foot + 1, w=pw, h=ph, pad=pad)
+        tw = text_w(cr, txt)
+        while tw + 12 + pad > self.W - 2 and len(txt) > 4:
+            txt = txt[:-2] + '…'; tw = text_w(cr, txt)
+        pw, ph = tw + 12 + pad, LABEL_H - 3
+        th = cr.text_extents(txt).height                    # (as the toy font sees it: plain names sit where they always did)
+        self._plate = dict(txt=txt, fs=fs, tw=tw, th=th, x=(self.W - pw) / 2, y=self.foot + 1, w=pw, h=ph, pad=pad)
         return self._plate
 
     def shape_input(self):
@@ -326,7 +350,7 @@ class Chibi:
         cr.set_source_rgba(*tone, .92); cr.fill_preserve()
         cr.set_source_rgba(.29, .17, .11, .8); cr.set_line_width(1.2); cr.stroke()
         cr.set_source_rgba(.29, .17, .11, .55 if (a and a.state == 'asleep') else 1)
-        cr.move_to(self.W / 2 - P['tw'] / 2 + P['pad'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); cr.show_text(P['txt'])
+        cr.move_to(self.W / 2 - P['tw'] / 2 + P['pad'] / 2, y0 + ph / 2 + P['th'] / 2 - 1); show_text(cr, P['txt'])
         if not P['pad']: return
         b, cx = self.bloom(), x0 + 10
         if b is None:                                       # no work yet today: a seed
@@ -580,10 +604,10 @@ class LemOverlay:
         if G.get('over'): txt, hint = G['over'], ''
         cr.select_font_face('Monospace', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(20)
         wa = self.app.workarea(); x0, y0 = wa.x + 24, wa.y + 40
-        for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2)): cr.move_to(x0 + dx, y0 + dy); cr.set_source_rgb(0, .12, 0); cr.show_text(txt)
-        cr.move_to(x0, y0); cr.set_source_rgb(.2, .95, .25); cr.show_text(txt)
+        for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2)): cr.move_to(x0 + dx, y0 + dy); cr.set_source_rgb(0, .12, 0); show_text(cr, txt)
+        cr.move_to(x0, y0); cr.set_source_rgb(.2, .95, .25); show_text(cr, txt)
         if hint:
-            cr.set_font_size(13); cr.move_to(x0, y0 + 22); cr.set_source_rgba(0, .3, 0, .9); cr.show_text(hint)
+            cr.set_font_size(13); cr.move_to(x0, y0 + 22); cr.set_source_rgba(0, .3, 0, .9); show_text(cr, hint)
         return True
 
 
@@ -734,7 +758,7 @@ class Bounce:
         self.name = c.label or ('Opus' if c.who.startswith('opus') else 'Haiku')
         cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
         cr.select_font_face('Sans', cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(19)
-        self.tw = cr.text_extents(self.name).x_advance
+        self.tw = text_w(cr, self.name)
         self.px = int(self.cell * self.sc)
         self.W, self.H = int(max(self.px * .8, self.tw + 12)), int(self.px * .92 + 30)
         wa = app.workarea()
@@ -794,7 +818,7 @@ class Bounce:
         cr.set_operator(cairo.OPERATOR_ATOP); cr.set_source_rgba(r, g, b, .62); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
         cr.set_source_rgb(r, g, b)
         cr.select_font_face('Sans', cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(19)
-        cr.move_to((self.W - self.tw) / 2, self.px * .86 + 12); cr.show_text(self.name)
+        cr.move_to((self.W - self.tw) / 2, self.px * .86 + 12); show_text(cr, self.name)
         cr.save(); cr.translate(self.W / 2, self.px * .86 + 22); cr.scale(min(self.W * .42, self.tw * .5 + 6), 4.5)
         cr.arc(0, 0, 1, 0, 2 * math.pi); cr.restore(); cr.fill()                       # the disc
         cr.pop_group_to_source(); cr.paint_with_alpha(max(0, self.alpha))
@@ -1014,9 +1038,9 @@ class Balloon:
         self.app, self.who, self.title, self.body, self.t, self.life = app, who, title, body, 0.0, life
         cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12)
-        tw = cr.text_extents(title).x_advance
+        tw = text_w(cr, title)
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL); cr.set_font_size(11.5)
-        bw = max([cr.text_extents(l).x_advance for l in body.split('\n')] + [0])
+        bw = max([text_w(cr, l) for l in body.split('\n')] + [0])
         self.W, self.H = int(max(tw + 34, bw) + 24), 24 + 16 * (len(body.split('\n')) if body else 0) + 22
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
         w.set_app_paintable(True)
@@ -1047,11 +1071,11 @@ class Balloon:
         cr.set_source_rgba(1, 1, .88, .97); cr.fill_preserve(); cr.set_source_rgba(0, 0, 0, .75); cr.set_line_width(1); cr.stroke()
         cr.set_source_rgb(.85, .47, .34); cr.arc(18, 18, 7, 0, 7); cr.fill()                       # a clay "i"
         cr.set_source_rgb(1, 1, 1); cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(10); cr.move_to(16, 22); cr.show_text('i')
-        cr.set_source_rgb(0, 0, 0); cr.set_font_size(12); cr.move_to(32, 22); cr.show_text(self.title)
+        cr.set_font_size(10); cr.move_to(16, 22); show_text(cr, 'i')
+        cr.set_source_rgb(0, 0, 0); cr.set_font_size(12); cr.move_to(32, 22); show_text(cr, self.title)
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL); cr.set_font_size(11.5)
         for i, l in enumerate(self.body.split('\n') if self.body else []):
-            cr.move_to(12, 40 + 16 * i); cr.show_text(l)
+            cr.move_to(12, 40 + 16 * i); show_text(cr, l)
         return True
 
 
@@ -1074,7 +1098,7 @@ class Speech:
         self.lines = lines[:4]
         cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 4, 4))
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(12.5)
-        self.W = int(max([cr.text_extents(l).x_advance for l in self.lines] + ([self.img.get_width()] if self.img else [])) + 26)
+        self.W = int(max([text_w(cr, l) for l in self.lines] + ([self.img.get_width()] if self.img else [])) + 26)
         self.ih = self.img.get_height() + 8 if self.img else 0
         self.H = 16 * len(self.lines) + 16 + 14 + self.ih
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
@@ -1122,7 +1146,7 @@ class Speech:
             cr.set_source_rgba(.29, .17, .11, .55); cr.set_line_width(1); cr.stroke()
         cr.set_source_rgb(.29, .17, .11)
         for i, l in enumerate(self.lines):
-            cr.move_to(13, 21 + 16 * i + self.ih); cr.show_text(l)
+            cr.move_to(13, 21 + 16 * i + self.ih); show_text(cr, l)
         return True
 
 
@@ -1162,7 +1186,7 @@ class Placard:
         else: cr.set_source_rgba(.92, .2, .2, a)
         cr.arc(14, self.H / 2, 4.5, 0, 7); cr.fill()
         cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD); cr.set_font_size(10.5)
-        cr.set_source_rgb(1, .93, .8); cr.move_to(25, self.H / 2 + 4); cr.show_text('PEANUT GALLERY')
+        cr.set_source_rgb(1, .93, .8); cr.move_to(25, self.H / 2 + 4); show_text(cr, 'PEANUT GALLERY')
         return True
 
 
@@ -2438,10 +2462,10 @@ def main():
         if os.fork(): return                      # detach, like oneko &
         os.setsid()
     open(PIDF, 'w').write('%d\n' % os.getpid())
-    global Gtk, Gdk, GLib, GdkPixbuf, cairo                  # GTK only after the fork
+    global Gtk, Gdk, GLib, GdkPixbuf, Pango, PangoCairo, cairo     # GTK only after the fork
     import gi
-    gi.require_version('Gtk', '3.0'); gi.require_version('Gdk', '3.0')
-    from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
+    gi.require_version('Gtk', '3.0'); gi.require_version('Gdk', '3.0'); gi.require_version('Pango', '1.0'); gi.require_version('PangoCairo', '1.0')
+    from gi.repository import Gtk, Gdk, GLib, GdkPixbuf, Pango, PangoCairo
     import cairo
     sys.path.insert(0, HERE)
     app = App(a)
