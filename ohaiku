@@ -45,7 +45,7 @@ for the menu. Middle-click the tray icon to hide or show everyone.
 
 X11 with a compositor. Every window is click-through.
 """
-import argparse, array, collections, json, math, os, random, signal, subprocess, sys, threading, time
+import argparse, array, collections, json, math, os, random, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 SHARE = os.path.join(HERE, 'share')
@@ -123,6 +123,17 @@ class Strips:
     def info(cls, who):
         if cls.meta is None: cls.meta = json.load(open(os.path.join(SHARE, 'sheets.json')))
         return cls.meta[who]
+
+    @classmethod
+    def custom(cls, name):
+        """a session's own look, if one is baked for its name (share/look-<name>, from ~/.config/ohaiku/looks/; see
+        ohLook in sprites/haiku.js), else None. A look baked by the sun (look-<name>-east/-noon/-west) follows the hour"""
+        if cls.meta is None: cls.info('haiku00')
+        k = 'look-' + re.sub(r'\s+', '-', re.sub(r"[^\w\s'-]", '', name or '').strip().lower())
+        if k in cls.meta: return k
+        h = time.localtime().tm_hour                   # (at night it turns back east, as a young sunflower does)
+        k += '-' + ('noon' if 11 <= h < 15 else 'west' if 15 <= h < 21 else 'east')
+        return k if k in cls.meta else None
 
     @classmethod
     def get(cls, who, state):
@@ -308,10 +319,39 @@ class Chibi:
         f = f % st['n'] if st['loop'] else min(f, st['n'] - 1)
         return st['n'] - 1 - f if self.rev else f
 
+    def companion(self):
+        """a look's companion (runtime: {companion: {color}}): a dot that drifts round her like a charge in a field, quicker while she works, and
+        settles beside her when she sleeps. -> (x, y, in front?) in the window, and its trail, or None"""
+        C = self.m.get('extras', {}).get('companion')
+        if not C or not self.label: return None
+        now = time.time(); dt = min(.1, now - getattr(self, '_ct', now)); self._ct = now
+        if not hasattr(self, '_cp'): self._cp = dict(a=random.uniform(0, 6.3), t=random.uniform(0, 50), rest=0.0, trail=collections.deque(maxlen=7))
+        P, st = self._cp, self.agent.state if self.agent else 'free'
+        work, asleep = st in ('think', 'tool') or self.state in WORK, st == 'asleep' or self.state in ('sleep', 'yawn')
+        P['t'] += dt; P['a'] += dt * (2.6 if work else .55); P['rest'] += dt * (.6 if asleep else -1.2); P['rest'] = min(1, max(0, P['rest']))
+        cx, cy = self.W / 2, self.foot - self.cpx * (.42 + .07 * math.sin(.7 * P['t']))
+        rx, ry = self.cpx * (.38 + .04 * math.sin(1.3 * P['t'])), self.cpx * .12
+        x, y = cx + rx * math.cos(P['a']), cy + ry * math.sin(P['a']) - .18 * rx * math.cos(P['a'])
+        k = P['rest'] * P['rest'] * (3 - 2 * P['rest'])
+        x, y = x + (cx + self.cpx * .36 - x) * k, y + (self.foot - 7 - y) * k
+        P['trail'].append((x, y))
+        return x, y, math.sin(P['a']) > 0 or k > .5, list(P['trail']), C
+
+    def draw_companion(self, cr, comp):
+        x, y, front, trail, C = comp
+        h = C.get('color', '#d8452b').lstrip('#'); r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        rad = 3.4 * self.sc / .82
+        for i, (tx, ty) in enumerate(trail[:-1]):             # the faint short trail
+            cr.set_source_rgba(r, g, b, .1 + .25 * i / len(trail)); cr.arc(tx, ty, rad * (.4 + .5 * i / len(trail)), 0, 7); cr.fill()
+        cr.set_source_rgba(r, g, b, 1 if front else .75); cr.arc(x, y, rad, 0, 7); cr.fill()
+        cr.set_source_rgba(1, 1, 1, .5); cr.arc(x - rad * .3, y - rad * .3, rad * .35, 0, 7); cr.fill()
+
     def tick_draw(self):
+        self._comp = self.companion()
         self.place()
         if self.label and getattr(self, 'calling', None) is not None and self.calling != (self.agent.state == 'ask'): self.shape_input()
-        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None, round(self.shrink, 2), self.bloom())
+        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None, round(self.shrink, 2), self.bloom(),
+               self.who, self._comp and (round(self._comp[0]), round(self._comp[1])))
         if key != self.shown:
             self.shown = key; self.win.queue_draw()
 
@@ -324,6 +364,8 @@ class Chibi:
         if self.shrink < 1:                                                 # being vacuumed into the tray
             cr.translate(self.W / 2, floor - self.cpx * .35); cr.rotate(self.spin); cr.scale(self.shrink, self.shrink)
             cr.translate(-self.W / 2, -(floor - self.cpx * .35))
+        comp = getattr(self, '_comp', None) if self.shrink > .98 and self.state not in ('leap', 'fall') else None
+        if comp and not comp[2]: self.draw_companion(cr, comp)
         cr.rectangle(0, 0, self.W, floor + 2 * self.sc); cr.clip()         # ducking: sink below the edge
         cr.translate((self.W - self.cpx) / 2, self.duck * self.cpx * .72)
         cr.scale(self.sc, self.sc)
@@ -331,6 +373,7 @@ class Chibi:
         cr.get_source().set_filter(cairo.FILTER_GOOD)
         cr.rectangle(0, 0, c, c); cr.fill()
         cr.restore()
+        if comp and comp[2]: self.draw_companion(cr, comp)
         if self.label and self.shrink > .98 and self.state not in ('leap', 'fall'): self.draw_label(cr, floor)
         return True
 
@@ -1335,7 +1378,7 @@ class App:
             c = self.agents.get(a.id)
             if c is None:
                 wa = self.workarea()
-                c = Chibi(self, a.look, wa.x + wa.width - 80, self.floor(), agent=a, scale=.62 if a.kind == 'sub' else .82,
+                c = Chibi(self, (a.kind == 'session' and Strips.custom(a.name)) or a.look, wa.x + wa.width - 80, self.floor(), agent=a, scale=.62 if a.kind == 'sub' else .82,
                           label=a.name)
                 self.agents[a.id] = c; new.append(c)
             else:
@@ -1421,6 +1464,11 @@ class App:
         self.balloons = [b for b in self.balloons if b.tick(dt)]
         self.speeches = [b for b in self.speeches if b.tick(dt)]
         if self.gallery_on: self.gallery_tick(dt)
+        if self.tk % (HZ * 60) == HZ * 7:                  # a session renamed into (or out of) a look, or the sun moved on
+            for c in self.agents.values():
+                if c.agent.kind != 'session': continue
+                want = Strips.custom(c.agent.name) or c.agent.look
+                if want != c.who: c.who, c.m = want, Strips.info(want)
         self.flowers = [f for f in self.flowers if f.tick(dt)]
         self.planes = [p for p in self.planes if p.tick(dt)]
         self.cascades = [k for k in self.cascades if k.tick(dt)]

@@ -1101,7 +1101,8 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
   const per = pose.persona && HK_PERSONAS[pose.persona] ? HK_PERSONAS[pose.persona] : {};
   const isOpus = pose.persona === 'opus';
   const V0 = isOpus ? _hkOpusVariant(pose.variant || 0) : haikuVariant(pose.variant || 0);
-  const V = { ...V0 };
+  const V = { ...V0 }, L = pose.lookName ? HK_LOOKS[pose.lookName] : null;
+  if (L) { Object.assign(V, L.V || {}); V.C = { ...CLAUDE, ...(L.colors || {}) }; V.custom = L; V.lookVar = pose.lookVar; }
   if (per.boots) { V.boots = per.boots; V.bootsDeep = mix(per.boots, '#2a1410', .4); }
   if (per.costume === 'sunflower') { V.flower = haikuFlower(0); V.hood = '#6f9a4f'; V.hoodShade = '#4d7536'; V.hoodTrim = '#d8e8b0'; V.sprout = false; V.star = false; V.patch = 'none'; }
   const move = pose.move || per.move || 'idle';
@@ -1189,6 +1190,8 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
   const neck = tiltM([0, HK_NECK]);
   const headC = [neck[0] + M.headDx + Math.sin(M.tilt) * HK_HEADC, neck[1] - HK_HEADC * Math.cos(M.tilt) + M.headDy];
   // --- draw, back to front ---
+  const c = { yaw, t, b, state: OH_STATE, move, prop, M, arms, headC }, hook = k => L && L[k] && L[k](K, V, c);
+  hook('behind');
   if (per.tail) _hkTail(K, V, b, yaw);
   legs.sort((a, b2) => a.z - b2.z).forEach(L => { _hkLeg(K, 'leg' + (L.sd < 0 ? 'L' : 'R'), L.H, L.F, yaw, V); _hkBoot(K, 'boot' + L.sd, L.F[0], L.F[1] + 10 - 10, yaw, V, 0); });
   const armBehind = arms.filter(a => a.z < -22), armFront = arms.filter(a => a.z >= -22);
@@ -1204,12 +1207,14 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
       K.ink('slfv' + sd, [[sd * 36 * Math.abs(cyw), -64], [sd * (36 * Math.abs(cyw) + 40), -78]], 1.2, { alpha: .5 });
     }
   }
+  hook('body');
   if (prop === 'drum') _hkDrum(K, V, beatHit, yaw);
   g.restore();
+  hook('over');
   if (book) {
     const from = pose.stampFrom ?? 0, marks = [];
     if (SP) for (let m = Math.max(from, SP.n - 3); m <= SP.n; m++) if (m !== SP.n || !SP.hit) { const [mx, my] = SP.at(m); marks.push([mx, 1, V.v * 100 + m, my]); }
-    g.save(); g.translate(0, BOOKY + (SP && SP.hit ? 2 : 0)); _hkBook(K, marks); g.restore();
+    g.save(); g.translate(0, BOOKY + (SP && SP.hit ? 2 : 0)); (L && L.book || _hkBook)(K, marks, L && L.stampTexture && L.stampTexture()); g.restore();
   }
   if (SP) {
     const cy0 = BOOKY - HK_BOOK.th - HK_BOOK.d + SP.y * HK_BOOK.d * .55, h = cy0 - SP.sy;
@@ -1231,6 +1236,7 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
   if (per.hat === 'shako') _hkShako(K, V, yaw);
   if (per.hat === 'printer') _hkPrinterHat(K, V, yaw, b);
   if (per.costume === 'battery') _hkNub(K, yaw);
+  hook('head');
   g.restore();
   for (const A of postHead) {
     _hkSleeve(K, 'arm' + A.sd, A.S, A.E, A.W, V, V.hood, V.hoodShade);
@@ -1263,9 +1269,10 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
     K.shape('sat', crSpline([[hx - 16, hy - 12], [hx + 16, hy - 12], [hx + 18, hy + 14], [hx - 18, hy + 14]], true, 3), '#a06a3c', { tex: .2, lw: 2.2 });
     _hkPacket(K, 'pkS', hx - 4, hy - 16, -.2, V.v + 7);
   }
-  if (prop === 'read') _hkReadBook(K, b, V);
+  if (prop === 'read') (L && L.readBook || _hkReadBook)(K, b, V);
   if (prop === 'search') _hkGlass(K, paw, V.side > 0 ? 1 : -1, b);
   if (prop === 'bar') { const a = arms[V.side > 0 ? 1 : 0]; _hkSign(K, a.W[0], a.W[1], V.side, Math.sin(b * Math.PI) * .06, pose.propK != null ? clamp(pose.propK) * 100 : 92, b); _hkSleeve(K, 'armS', a.S, a.E, a.W, V, V.hood, V.hoodShade); }
+  hook('front');
   g.restore();
 }
 function _hkSpinFx(K, b) {
@@ -1342,6 +1349,24 @@ function haikuDrumHead(x, y, s, pose = {}) {
 // drawProblemBook(g, x, y, s, opts)    the giant book lying flat (origin: middle of its front-bottom edge);
 //   opts { t, marks: [[x, k], ...] (x across the cover, -1..1), jolt }
 // =============================================================================================
+// Custom looks. ohLook(name, def) registers one; bake.mjs loads every *.js in ~/.config/ohaiku/looks/ (yours, not
+// this repo's) and bakes it as share/look-<name>/. A look starts from a chibi Opus and may change anything:
+//   base     the Opus variant it starts from (0..7)
+//   colors   CLAUDE overrides (also sleeve/sleeveShade for the arms, cape/capeShade for the capelet)
+//   V        variant overrides (bow, bowDeep, satchel, clip2, nPetals, ...)
+//   variants names to bake it in, as look-<name>-<variant> (each frame sees V.lookVar), e.g. by time of day
+//   runtime  what ohaiku should do live (copied to sheets.json as `extras`)
+// and hooks, each called with (K, V, c), c = { yaw, t, b, state, move, prop, M, arms, headC }:
+//   petals(K, V, yaw, ex)   instead of the petal bob     clip(K, x, y, k, yaw)  instead of the star clip (null: none)
+//   behind   before the legs                            body   on the torso, in its tilt frame
+//   over     after the body, before the head            head   in the head's frame, after the face
+//   front    last: things held, things in front
+//   readBook(K, b, V)  instead of the open PROBLEM SET   book(K, marks, tex)  instead of the book under the stamp
+//   stampTexture()     the stamp's mark (a 400x200 canvas; use cached())
+const HK_LOOKS = {};
+function ohLook(name, def) { HK_LOOKS[name] = def; }
+let OH_STATE = null;                  // the ohaiku state being baked (bakeStrips sets it), for looks that change with it
+
 const HK_OPUS_BOWS = [['#4f7d78', '#36605b'], ['#c4383a', '#8a2228'], ['#6d4a5e', '#4a3040'], ['#d6a443', '#a87a25'], ['#5b86c0', '#3f5c8a'], ['#8fa27c', '#5d7a4e'], ['#e07a9a', '#a8506a']];
 const _hkOpusCache = new Map();
 function _hkOpusVariant(v = 0) {
@@ -1372,12 +1397,13 @@ function _hkJelly(tb, d, f = 4.2, z = 5.2) {
 function _hkOpusPetalList(V) {
   const N0 = V.nPetals, st = 300 / N0, out = [];
   const Rof = A => 106 + 6 * Math.cos(A * Math.PI / 90) * (A < 90 ? 1 : 0) - (A > 60 && A < 115 ? 8 * Math.sin((A - 60) / 55 * Math.PI) : 0) + (A > 115 ? (A - 115) * .42 : 0);
-  for (let i = 0; i <= N0; i++) { const a = -150 + i * st; out.push({ ring: 0, a, r0: 30, len: Rof(Math.abs(a)) - 30 + 6, w: 17, i }); }
-  for (let i = 0; i < N0; i++) { const a = -150 + st / 2 + i * st; out.push({ ring: 1, a, r0: 28, len: Rof(Math.abs(a)) - 28 - 18, w: 18.5, i: i + 100 }); }
+  const pw = V.petalW || 1;                                  // (a look can make them narrower: a dandelion's rays)
+  for (let i = 0; i <= N0; i++) { const a = -150 + i * st; out.push({ ring: 0, a, r0: 30, len: Rof(Math.abs(a)) - 30 + 6, w: 17 * pw, i }); }
+  for (let i = 0; i < N0; i++) { const a = -150 + st / 2 + i * st; out.push({ ring: 1, a, r0: 28, len: Rof(Math.abs(a)) - 28 - 18, w: 18.5 * pw, i: i + 100 }); }
   return out;
 }
 function _hkOpusPetals(K, V, yaw, ex) {
-  const g = K.g, C = CLAUDE, hc = [0, -8];
+  const g = K.g, C = V.C || CLAUDE, hc = [0, -8];
   const cy = Math.cos(yaw), xs = (cy < 0 ? -1 : 1) * Math.max(Math.abs(cy), .55), shift = Math.sin(yaw) * -10;
   const w = ex.wobble || 0, tb = ex.tb || 0, t = ex.t || 0;
   const items = _hkOpusPetalList(V).map(p => {
@@ -1414,8 +1440,9 @@ function _hkOpusPetals(K, V, yaw, ex) {
   }
 }
 function _hkOpusHead(K, P, V, yaw, ex) {
-  const g = K.g, C = CLAUDE, cy = Math.cos(yaw), frontish = cy > -.15;
-  _hkOpusPetals(K, V, yaw, ex);
+  const g = K.g, C = V.C || CLAUDE, cy = Math.cos(yaw), frontish = cy > -.15;
+  const L = V.custom, clip = L && 'clip' in L ? L.clip : _hkStarClip;
+  if (L && L.petals) L.petals(K, V, yaw, ex); else _hkOpusPetals(K, V, yaw, ex);
   if (!frontish) {
     // the back of her head: a round of hair with a crown whorl, the star clip on the far side
     const sk = polyCircle(Math.sin(yaw) * -4, -10, 62, 64, 30);
@@ -1423,7 +1450,7 @@ function _hkOpusHead(K, P, V, yaw, ex) {
     K.shape('oskull', sk, gr, { tex: .2, lw: 2.6 });
     for (let k = 0; k < 6; k++) { const a = -2.4 + k * .9; K.ink('owh' + k, bez([2, -40], [Math.cos(a) * 20, -40 + Math.sin(a) * 18], [Math.cos(a) * 36, -10 + Math.sin(a) * 26], [Math.cos(a) * 46, -8 + Math.sin(a) * 40], 8), 1.1, { color: C.hairLine, alpha: .3 }); }
     const [sx] = _hkFaceP(-40, 0, yaw - Math.PI, 70);
-    _hkStarClip(K, sx, -50, .7);
+    if (clip) clip(K, sx, -50, .7, yaw);
     return;
   }
   _hkFace(K, P, V, yaw);
@@ -1453,14 +1480,14 @@ function _hkOpusHead(K, P, V, yaw, ex) {
   K.ink('odome', top, 2.4);
   notches.forEach((N, i) => K.ink('obn' + i, [N, [N[0] * .8, N[1] - 22]], 1.3, { color: C.hairLine, alpha: .55 }));
   const [sx, , ws, vis] = _hkFaceP(40, 0, yaw, 72);
-  if (vis) _hkStarClip(K, sx, -50, .72 * Math.max(.5, ws));
+  if (vis && clip) clip(K, sx, -50, .72 * Math.max(.5, ws), yaw);
   if (V.clip2) { const [cx] = _hkFaceP(-44, 0, yaw, 72); K.shape('oclip2', _hkPlace(polyRect(-9, -3, 18, 6), cx, -36, .5), V.bow, { tex: .1, lw: 1.6 }); }
 }
 
 function _hkOpusSleeve(K, name, S, E, Wp, V) {
-  const C = CLAUDE, a = Math.atan2(Wp[1] - E[1], Wp[0] - E[0]), ca = Math.cos(a), sa = Math.sin(a);
+  const C = V.C || CLAUDE, a = Math.atan2(Wp[1] - E[1], Wp[0] - E[0]), ca = Math.cos(a), sa = Math.sin(a);
   const pts = limbPts([S, E, Wp], [12.5, 12, 11.5], 6, true);
-  K.shape(name, pts, C.jacket, { tex: .16, lw: 2.4, shade: gg => { gg.fillStyle = C.jacketShade; gg.globalAlpha = .8; const q = chTr(pts, -5, -4); gg.beginPath(); gg.rect(-3000, -3000, 6000, 6000); gg.moveTo(q[0][0], q[0][1]); for (const v of q) gg.lineTo(v[0], v[1]); gg.closePath(); gg.fill('evenodd'); } });
+  K.shape(name, pts, C.sleeve || C.jacket, { tex: .16, lw: 2.4, shade: gg => { gg.fillStyle = C.sleeveShade || C.jacketShade; gg.globalAlpha = .8; const q = chTr(pts, -5, -4); gg.beginPath(); gg.rect(-3000, -3000, 6000, 6000); gg.moveTo(q[0][0], q[0][1]); for (const v of q) gg.lineTo(v[0], v[1]); gg.closePath(); gg.fill('evenodd'); } });
   // a little mitten hand (thumb bump toward the body) and a clay cuff
   const hx = Wp[0] + ca * 9, hy = Wp[1] + sa * 9;
   K.shape(name + 'th', polyCircle(hx - sa * 7, hy + ca * 7, 4.6, 4.6, 10), C.skin, { tex: .06, lw: 2 });
@@ -1470,7 +1497,7 @@ function _hkOpusSleeve(K, name, S, E, Wp, V) {
 }
 
 function _hkOpusBody(K, V, yaw, M) {
-  const g = K.g, C = CLAUDE, cy = Math.cos(yaw), sn = Math.sin(yaw), wf = Math.sqrt(cy * cy + .7 * sn * sn);
+  const g = K.g, C = V.C || CLAUDE, cy = Math.cos(yaw), sn = Math.sin(yaw), wf = Math.sqrt(cy * cy + .7 * sn * sn);
   const X = x => x * wf;
   // skirt: a teal bell that flares on the hop
   const fl = 1 + clamp(M.hop / 90) * .18 + Math.abs(M.sway) * .004;
@@ -1495,7 +1522,7 @@ function _hkOpusBody(K, V, yaw, M) {
   const cw = 54, cyb = -100, nS = 6, scal = [];
   for (let i = 0; i <= nS * 4; i++) { const u = i / (nS * 4), x = lerp(cw, -cw, u), ph = (u * nS) % 1; scal.push([X(x), cyb + 7 * Math.sin(u * Math.PI) + 6 * Math.sin(ph * Math.PI)]); }
   const cape = [[X(-16), -146], [X(16), -146], ...bez([X(16), -146], [X(44), -142], [X(cw + 2), -126], [X(cw), cyb], 8).slice(1), ...scal.slice(1), ...bez([X(-cw), cyb], [X(-cw - 2), -126], [X(-44), -142], [X(-16), -146], 8).slice(1)];
-  K.shape('ocape', cape, C.jacket, { tex: .15, lw: 2.6, shade: gg => { gg.fillStyle = C.jacketShade; gg.globalAlpha = .8; gg.beginPath(); gg.ellipse(X(30), -98, 40, 30, 0, 0, 7); gg.fill(); } });
+  K.shape('ocape', cape, C.cape || C.jacket, { tex: .15, lw: 2.6, shade: gg => { gg.fillStyle = C.capeShade || C.jacketShade; gg.globalAlpha = .8; gg.beginPath(); gg.ellipse(X(30), -98, 40, 30, 0, 0, 7); gg.fill(); } });
   K.ink('otrim', scal.map(([x, y]) => [x, y - 5]), 2.4, { color: C.trim, alpha: .9 });
   if (cy > .05) {
     K.ink('ocapeC', [[0, -140], [0, -118]], 1.3, { alpha: .5 });
@@ -1523,7 +1550,7 @@ function drawStampMark(g, x, y, s = 1, k = 1, o = {}) {
   const r = rng('qedmark' + (o.seed ?? 0)), rot = o.rot ?? r.range(-.12, .12), pop = 1 + .14 * (1 - ease.outC(clamp(k * 2)));
   g.save(); g.translate(x, y); g.scale(1, o.sy ?? 1); g.rotate(rot); g.scale(s * pop * .45, s * pop * .45);
   g.globalAlpha = clamp(k * 1.6) * .9; if (o.multiply) g.globalCompositeOperation = 'multiply';
-  g.drawImage(_hkQedTexture(), -200, -100);
+  g.drawImage(o.tex || _hkQedTexture(), -200, -100);
   g.restore();
 }
 const HK_BOOK = { w: 264, d: 62, th: 26 };       // half-depth of the cover as seen (top face from y = -d*2 to 0 above the front edge)
@@ -1532,7 +1559,7 @@ function drawProblemBook(g, x, y, s = 1, o = {}) {
   g.save(); g.translate(x, y + (o.jolt || 0)); g.scale(s, s); _hkBook(K, o.marks || []); g.restore();
 }
 // origin: middle of the book's front-bottom edge; the cover's centre line is at y = -th - d
-function _hkBook(K, marks) {
+function _hkBook(K, marks, tex) {
   const g = K.g, { w, d, th } = HK_BOOK, hw = w / 2, back = -th - 2 * d, front = -th;
   _chShadow(g, 0, -6, hw * 1.15, 16, .28);
   // pages (front edge) and the lower board
@@ -1551,7 +1578,7 @@ function _hkBook(K, marks) {
   g.fillText('PROBLEM', 0, -16); g.fillText('SET ∞', 0, 20);
   g.restore();
   // the Q.E.D.s so far
-  for (const [mx, mk, seed, my = 0] of marks) drawStampMark(g, mx * hw * .42 + hw * .4, (back + front) / 2 + my * d * .55, .6, mk, { sy: .62, seed });
+  for (const [mx, mk, seed, my = 0] of marks) drawStampMark(g, mx * hw * .42 + hw * .4, (back + front) / 2 + my * d * .55, .6, mk, { sy: .62, seed, tex });
 }
 function _hkStampPlan(V, b) {
   // which beat we're on, how high the stamp is (0 = down on the cover), and where it lands next

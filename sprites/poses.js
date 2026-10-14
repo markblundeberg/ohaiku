@@ -46,8 +46,11 @@ function ohBang(g, x, y, k = 1) {
 // ---------------------------------------------------------------------------------------------
 const OH_BPM = 100;
 function ohStates(who) {
-  const isOpus = typeof who === 'string' && who.startsWith('opus');
-  const base = isOpus ? { persona: 'opus', variant: +(who.slice(4) || 0) } : { variant: who };
+  const lk = typeof who === 'string' && who.startsWith('look:') ? who.slice(5).split('@') : null;      // look:name[@variant]
+  if (lk && !HK_LOOKS[lk[0]]) throw new Error('no look called ' + lk[0]);
+  const isOpus = !!lk || (typeof who === 'string' && who.startsWith('opus'));
+  const base = lk ? { persona: 'opus', variant: HK_LOOKS[lk[0]].base || 0, lookName: lk[0], lookVar: lk[1] }
+    : isOpus ? { persona: 'opus', variant: +(who.slice(4) || 0) } : { variant: who };
   const H = (g, pose, x = 0, y = 0) => drawHaiku(g, x, y, 1, { ...base, ...pose });
   const lie = (g, t, o = {}) => {        // asleep on its side; the nose is up near (-118, -128) after the turn
     g.save(); g.translate(110, -40); g.rotate(-Math.PI / 2 + .08);
@@ -289,6 +292,7 @@ function bakeStrips(who, px, only) {
   const S = ohStates(who), s = px / OH.cellU, out = {}, meta = { cell: px, foot: [px / 2, Math.round(OH.footU * s)], states: {} };
   for (const [name, st] of Object.entries(S)) {
     if (only && !only.includes(name)) continue;
+    OH_STATE = name;
     const c = document.createElement('canvas'); c.width = st.n * px; c.height = px;
     const g = c.getContext('2d');
     for (let i = 0; i < st.n; i++) {
@@ -297,6 +301,9 @@ function bakeStrips(who, px, only) {
     }
     out[name] = c.toDataURL('image/png'); meta.states[name] = { n: st.n, fps: st.fps, loop: st.loop };
   }
+  OH_STATE = null;
+  const L = typeof who === 'string' && who.startsWith('look:') && HK_LOOKS[who.slice(5).split('@')[0]];
+  if (L && L.runtime) meta.extras = L.runtime;
   return { out, meta };
 }
 
