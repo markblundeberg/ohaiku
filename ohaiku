@@ -117,12 +117,20 @@ def show_text(cr, s):
 
 
 class Strips:
-    meta, surf = None, {}
+    meta, surf, mtime = None, {}, 0
 
     @classmethod
     def info(cls, who):
         if cls.meta is None: cls.meta = json.load(open(os.path.join(SHARE, 'sheets.json')))
         return cls.meta[who]
+
+    @classmethod
+    def fresh(cls):
+        """re-read sheets.json if a bake has rewritten it since (a look baked while we run turns up without a restart)"""
+        try: m = os.path.getmtime(os.path.join(SHARE, 'sheets.json'))
+        except OSError: return
+        if cls.mtime and m != cls.mtime: cls.meta, cls.surf = None, {}
+        cls.mtime = m
 
     @classmethod
     def custom(cls, name):
@@ -1465,6 +1473,7 @@ class App:
         self.speeches = [b for b in self.speeches if b.tick(dt)]
         if self.gallery_on: self.gallery_tick(dt)
         if self.tk % (HZ * 60) == HZ * 7:                  # a session renamed into (or out of) a look, or the sun moved on
+            Strips.fresh()
             for c in self.agents.values():
                 if c.agent.kind != 'session': continue
                 want = Strips.custom(c.agent.name) or c.agent.look

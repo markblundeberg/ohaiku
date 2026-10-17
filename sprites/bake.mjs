@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer-core';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath, pathToFileURL } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
-const px = +arg('px', 128), out = path.resolve(here, arg('out', '../share'));
+const px = +arg('px', 160), out = path.resolve(here, arg('out', '../share'));
 let who = (arg('who', '0,1,2,3,4,5,6,7,8,9,10,11,opus0,opus1,opus2,opus3,opus4,opus5,opus6,opus7')).split(',').map(w => /^(opus|look)/.test(w) ? w : +w);
 const looksDir = arg('looks', path.join(os.homedir(), '.config/ohaiku/looks'));
 fs.mkdirSync(out, { recursive: true });
