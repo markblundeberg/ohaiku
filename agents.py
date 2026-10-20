@@ -221,7 +221,7 @@ def scan(within=2 * 3600, now=None):
         if now - mt > within and not L: continue
         try: p = _parse(path)
         except OSError: continue
-        if not L and p['entry'] == 'cli': continue          # a command-line session whose process has exited: closed
+        if not L and (p['entry'] == 'cli' or (p['entry'] or '').startswith('sdk')): continue   # a command-line or headless (-p, Agent SDK) session whose process has exited: closed
         title, aname, ai = p['title'], p['aname'], p['ai']
         if not title and not aname:
             t2, a2, ai2 = _whole_file_names(path); title, aname, ai = t2, a2, ai or ai2
