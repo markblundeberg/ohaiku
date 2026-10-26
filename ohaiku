@@ -280,7 +280,7 @@ class Chibi:
         d = math.hypot(dx, dy)
         want = self.work()
         if s == 'sleep':
-            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.agent is None or self.app.mode != 'perch' or self.app.gallery_on): self.set('wake')
+            if want != 'sleep' and (want is not None or d > 40 * self.sc or self.app.mode != 'perch' or self.app.gallery_on): self.set('wake')   # (a pet naps until something wakes it)
             return
         if s == 'wake':
             if self.done_anim(): self.set('alert')
