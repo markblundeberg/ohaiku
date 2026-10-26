@@ -179,6 +179,7 @@ class Chibi:
         self.on, self.off, self.arc, self.vy, self.falling = None, 0.0, None, 0.0, False   # recess: which window top
         self.next_hop, self.goal, self.settled = None, None, False
         self.browsing_until = 0.0                         # recess: still the browser's, between its browser steps
+        self.press, self.pochi_t = None, -9.0             # pressing buttons for its session (App.press_tick); when its last stomp landed
         self.W = self.cpx + 40 if label else self.cpx
         self.H = self.cpx + (LABEL_H if label else 0)
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
@@ -368,10 +369,15 @@ class Chibi:
         self._comp = self.companion()
         self.place()
         if self.label and getattr(self, 'calling', None) is not None and self.calling != (self.agent.state == 'ask'): self.shape_input()
-        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None, round(self.shrink, 2), self.bloom(),
+        key = (self.state, self.frame(), round(self.duck, 2), self.agent.state if self.agent else None, round(self.shrink, 2), self.bloom(), round(self.squash(), 2),
                self.who, self._comp and (round(self._comp[0]), round(self._comp[1])))
         if key != self.shown:
             self.shown = key; self.win.queue_draw()
+
+    def squash(self):
+        """after a stomp: a damped wobble, squashed flat at once, then springing back (0 when still)"""
+        t = time.time() - self.pochi_t
+        return math.exp(-t * 8) * math.cos(t * 24) if t < .6 else 0.0
 
     def draw(self, w, cr):
         cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint()
@@ -379,6 +385,9 @@ class Chibi:
         c, f = self.m['cell'], self.frame()
         floor = self.foot
         cr.save()
+        q = self.squash()
+        if q:                                                               # squash about the feet
+            cr.translate(self.W / 2, floor); cr.scale(1 + .22 * q, 1 - .26 * q); cr.translate(-self.W / 2, -floor)
         if self.shrink < 1:                                                 # being vacuumed into the tray
             cr.translate(self.W / 2, floor - self.cpx * .35); cr.rotate(self.spin); cr.scale(self.shrink, self.shrink)
             cr.translate(-self.W / 2, -(floor - self.cpx * .35))
@@ -392,7 +401,7 @@ class Chibi:
         cr.rectangle(0, 0, c, c); cr.fill()
         cr.restore()
         if comp and comp[2]: self.draw_companion(cr, comp)
-        if self.label and self.shrink > .98 and self.state not in ('leap', 'fall'): self.draw_label(cr, floor)
+        if self.label and self.shrink > .98 and self.state not in ('leap', 'fall') and not self.press: self.draw_label(cr, floor)
         return True
 
     def bloom(self):
@@ -928,6 +937,64 @@ PROGRAMME_DEFAULT = """# Haiku Theater 3000's programme. One per line: a video f
 VIDEO_EXT = ('.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v', '.gif')
 
 
+class Burst:
+    """where a stomp lands: a shock ring flattened onto the button's face, speed lines, and ポチッ (the sound of pressing
+    a button) popping up beside it. Click-through; gone in under a second."""
+    T = .85
+
+    def __init__(self, app, x, y, sc, n):
+        self.app, self.x, self.y, self.t, self.n = app, x, y, 0.0, n
+        self.k = max(.7, sc / .82)
+        self.side = 1 if n % 2 else -1                     # a run of presses: the word on alternate sides
+        self.word = 'ポチッ' if n == 1 or random.random() < .5 else random.choice(('ポチ', 'ぽち', 'ポン'))
+        self.S = int(300 * self.k)
+        w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        w.set_app_paintable(True)
+        vis = w.get_screen().get_rgba_visual()
+        if vis: w.set_visual(vis)
+        w.resize(self.S, self.S); w.move(int(x - self.S / 2), int(y - self.S / 2))
+        w.connect('draw', self.draw)
+        w.connect('realize', lambda *_: w.input_shape_combine_region(cairo.Region()))
+        if not app.hidden and not app.locked: w.show_all()
+
+    def tick(self, dt):
+        self.t += dt
+        if self.t > self.T: self.win.destroy(); return False
+        self.win.queue_draw(); return True
+
+    def draw(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
+        t, k, c = self.t, self.k, self.S / 2
+        e = 1 - (1 - min(1, t / .42)) ** 3                 # ease out
+        a = max(0, 1 - t / .5)
+        if a > 0:                                         # the ring, lying flat on the button
+            r = k * (12 + 62 * e)
+            cr.save(); cr.translate(c, c); cr.scale(1, .42); cr.arc(0, 0, r, 0, 2 * math.pi); cr.restore()
+            cr.set_source_rgba(1, .62, .18, .85 * a); cr.set_line_width(k * (7 - 5 * e)); cr.stroke_preserve()
+            cr.set_source_rgba(1, 1, .9, .9 * a); cr.set_line_width(k * (3 - 2 * e)); cr.stroke()
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)         # speed lines, fanned upward
+            for i in range(9):
+                ang = math.pi * (1.06 + .88 * i / 8)
+                r1, r2 = k * (30 + 46 * e), k * (44 + 92 * e)
+                cr.move_to(c + r1 * math.cos(ang), c + .8 * r1 * math.sin(ang)); cr.line_to(c + r2 * math.cos(ang), c + .8 * r2 * math.sin(ang))
+                cr.set_source_rgba(.29, .17, .11, .85 * a); cr.set_line_width(k * (3.2 if i % 2 else 2)); cr.stroke()
+        # the word: pops in with an overshoot, floats up a little, fades
+        pop = min(1, t / .14); s = (.5 + .75 * pop) if t < .14 else 1 + .25 * math.exp(-(t - .14) * 14) * math.cos((t - .14) * 30)
+        fade = 1 if t < .55 else max(0, 1 - (t - .55) / .3)
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription('Sans Heavy %d' % int((30 if self.n == 1 else 22) * k)))
+        lay.set_text(self.word, -1)
+        tw, th = lay.get_pixel_size()
+        cr.save(); cr.translate(c + self.side * k * 70, c - k * (62 + 18 * t)); cr.rotate(-.2 * self.side); cr.scale(s, s)
+        cr.translate(-tw / 2, -th / 2)
+        PangoCairo.layout_path(cr, lay)
+        cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        cr.set_source_rgba(.29, .17, .11, fade); cr.set_line_width(k * 6); cr.stroke_preserve()
+        cr.set_source_rgba(1, .84, .25, fade); cr.fill()
+        cr.restore()
+        return True
+
+
 def programme():
     if not os.path.exists(PROGRAMME):
         os.makedirs(os.path.dirname(PROGRAMME), exist_ok=True); open(PROGRAMME, 'w').write(PROGRAMME_DEFAULT)
@@ -1267,6 +1334,7 @@ class App:
         self.show_agents = not a.no_agents
         self.surfaces, self.world_ok = [], True
         self.wins, self.active_win = [], None             # every window (id, x, y, w, h, class, title), for workplace()
+        self.bursts = []                                  # the ポチッ where a stomp lands
         self.shake, self.studying, self.peeker = [], None, None
         self.balloons, self.surfer, self.it, self.it_t = [], None, 'you', 0.0     # tag
         self.flowers, self.party = [], []                                          # bloomcore
@@ -1525,8 +1593,10 @@ class App:
             self.tag(cx, cy, dt); self.reap(); self.keep_on_top(); return True
         if self.mode == 'lemmings' and self.game: self.lem_tick(dt)
         fl = self.floor()
+        self.bursts = [b for b in self.bursts if b.tick(dt)]
         for c, tx, ty in list(self.targets(cx, cy)):
-            if c.arc or c.falling: self.air(c, dt)
+            if c.press: self.press_tick(c, dt)
+            elif c.arc or c.falling: self.air(c, dt)
             elif self.mode in ('recess', 'bloomcore') and c.state != 'spawn': self.recess(c, dt, fl)
             else:
                 if self.mode in ('perch', 'lemmings') and c.y < fl - 6 and c.state != 'spawn':     # up on a window: jump down home
@@ -2161,6 +2231,8 @@ class App:
             c.y = A['y0'] + (A['y1'] - A['y0']) * k - A['h'] * 4 * k * (1 - k)
             if A['x1'] != A['x0']: c.heading = 1 if A['x1'] > A['x0'] else -1
             c.t += dt
+            if k >= 1 and A.get('press'):
+                c.arc, c.x, c.y = None, A['x1'], A['y1']; self.pochi(c); return
             if k >= 1:
                 s = self.surface(A['sid']) if A['sid'] else None
                 if A['sid'] and (s is None or not s.stands(c.x)): c.arc = None; c.falling = True; c.set('fall')
@@ -2171,6 +2243,74 @@ class App:
             if s.stands(c.x) and c.y <= s.y <= ny: self.land(c, s.id, s.y); return
         if ny >= fl: self.land(c, None, fl); return
         c.y = ny
+
+    # -- pressing buttons: a session's chibi hops onto each one and stomps, and the stomp is the click -------------
+    def press_cmd(self, arg):
+        """press:{"who": [pids...] or name, "at": [[name, x, y, w, h], ...], "id": token}"""
+        try: J = json.loads(arg)
+        except ValueError: return
+        who, cs = J.get('who'), [c for c in self.agents.values() if c.agent.kind == 'session' and not c.gone]
+        c = next((c for c in cs if isinstance(who, list) and c.agent.pid in who), None) or \
+            next((c for c in cs if who in (c.agent.names or []) + [c.agent.name]), None) or \
+            next((c for c in cs if c.work() not in (None, 'sleep')), None) or (cs or self.pets or [None])[0]
+        if c is None or self.hidden or self.locked:
+            self.press_report(J.get('id'), None, [], 'no one to press it (hidden, locked, or no chibis)'); return
+        if c.press: c.press['jobs'].extend(J['at']); return          # already pressing: add these
+        c.arc, c.falling, c.goal, c.on = None, False, None, None
+        c.press = dict(jobs=collections.deque(J['at']), id=J.get('id'), log=[], stage='go', hold=0.0, n=0)
+        c.win.input_shape_combine_region(cairo.Region())            # click-through all over, plate too: the click goes to the button
+
+    def press_tick(self, c, dt):
+        P = c.press
+        if c.arc: self.air(c, dt); return
+        c.t += dt
+        if P['stage'] == 'hold':
+            P['hold'] -= dt
+            if P['hold'] <= 0: P['stage'] = 'go'
+            return
+        if not P['jobs']: self.press_end(c); return
+        nm, x, y, w, h = P['jobs'][0]
+        fx, fy = x + w / 2, y + h * .62                             # feet on the button's face, a little below its middle
+        d = math.hypot(fx - c.x, fy - c.y)
+        c.arc = dict(x0=c.x, y0=c.y, x1=fx, y1=fy, sid=None, t=0.0, T=(.32 if P['n'] else .55) + d / 2200,
+                     h=(55 if P['n'] else 150) + .2 * d, press=True)
+        c.set('leap'); P['stage'] = 'air'
+
+    def pochi(self, c):
+        """the stomp: squash, the burst, and the real click at the button's centre"""
+        P = c.press; nm, x, y, w, h = P['jobs'].popleft(); P['n'] += 1
+        c.pochi_t = time.time(); c.set('done')
+        self.bursts.append(Burst(self, x + w / 2, y + h * .62, c.sc, P['n']))
+        self.click(x + w / 2, y + h / 2)
+        P['log'].append([nm, round(x + w / 2), round(y + h / 2), round(time.time(), 3)])
+        P['stage'], P['hold'] = 'hold', (.22 if P['jobs'] else .8)
+
+    def press_end(self, c):
+        P, c.press = c.press, None
+        self.press_report(P['id'], c.agent.name if c.agent else c.who, P['log'], None)
+        c.shape_input(); c.falling, c.vy = True, -520.0; c.set('fall')     # hop off; then back to whatever it was doing
+
+    def press_report(self, token, who, log, err):
+        if not token: return
+        try: open(_RUN + '.pressed-' + str(token), 'w').write(json.dumps(dict(who=who, pressed=log, error=err)) + '\n')
+        except OSError: pass
+
+    def click(self, x, y):
+        """a real left click at (x, y) (XTest), then the pointer goes back where it was"""
+        def go():
+            try:
+                from Xlib import X, display as xdisplay
+                from Xlib.ext import xtest
+                d = xdisplay.Display(); p = d.screen().root.query_pointer()
+                for ev, arg, wait in ((X.MotionNotify, None, .03), (X.ButtonPress, 1, .06), (X.ButtonRelease, 1, .03), (X.MotionNotify, 'back', 0)):
+                    if ev == X.MotionNotify:
+                        xx, yy = (p.root_x, p.root_y) if arg == 'back' else (int(x), int(y))
+                        xtest.fake_input(d, ev, x=xx, y=yy)
+                    else: xtest.fake_input(d, ev, arg)
+                    d.sync(); time.sleep(wait)
+                d.close()
+            except Exception as e: print('ohaiku: click:', e, file=sys.stderr)
+        threading.Thread(target=go, daemon=True).start()
 
     def workplace(self, c):
         """the window this chibi's work is in right now: the browser while its session drives one (and for a little
@@ -2447,6 +2587,9 @@ class App:
                 try: open(_RUN + '.status', 'w').write(json.dumps(st, indent=1) + '\n')
                 except OSError: pass
             elif c.startswith('surprise:'): self.surprise(c[9:])     # (for testing one)
+            elif c.startswith('press:'):
+                import base64
+                self.press_cmd(base64.urlsafe_b64decode(c[6:]).decode())
             elif c == 'cascade':                          # (for testing: a pretend long finish)
                 cs = [x for x in self.agents.values() if not x.gone]
                 if cs: self.cascades.append(Cascade(self, random.choice(cs)))
@@ -2526,9 +2669,47 @@ def main():
     p.add_argument('--status', action='store_true', help="what they're up to")
     p.add_argument('--restart', action='store_true', help='send them home and start again (agents only)')
     p.add_argument('--fg', action='store_true', help=argparse.SUPPRESS)
+    p.add_argument('--press', nargs='+', metavar='BUTTON', help='your chibi stomps on these buttons, in order (a real click each), in the window --in names')
+    p.add_argument('--in', dest='within', metavar='TITLE', help='for --press: part of the window title')
+    p.add_argument('--press-at', nargs=2, type=int, metavar=('X', 'Y'), help='stomp on this screen point instead')
+    p.add_argument('--who', help="for --press: whose chibi (a session's name; default: the session running this)")
     a = p.parse_args()
     modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery', 'leaves') if getattr(a, m)]
     pid = running_pid()
+    if a.press or a.press_at:
+        if not pid: print('ohaiku is not running'); sys.exit(1)
+        if a.press_at: at = [['(%d, %d)' % tuple(a.press_at), a.press_at[0] - 20, a.press_at[1] - 20, 40, 40]]
+        else:
+            if not a.within: print('--press needs --in TITLE (part of the window title)'); sys.exit(2)
+            import ui, world
+            W = world.Surfaces()
+            mine = [w for w in W.windows() if a.within.lower() in w[6].lower()]
+            if mine: subprocess.run(['wmctrl', '-i', '-a', str(mine[-1][0])]); time.sleep(.35)    # bring it to the front first
+            try: at = [list(b) for b in ui.find(a.within, a.press)]
+            except KeyError as e: print('ohaiku:', e.args[0]); sys.exit(1)
+            wins = W.windows()                    # a real click goes to whatever is on top there: make sure that's this window
+            for nm, x, y, w, h in at:
+                cx, cy = x + w / 2, y + h / 2
+                top = next((v for v in reversed(wins) if v[1] <= cx < v[1] + v[3] and v[2] <= cy < v[2] + v[4]), None)
+                if top is None or a.within.lower() not in top[6].lower():
+                    print('ohaiku: %r is covered by %r; not pressing anything' % (nm, top[6] if top else 'nothing')); sys.exit(1)
+        anc, q = [], os.getpid()                  # who's asking: the Claude Code process above us, if any
+        while q > 1 and len(anc) < 40:
+            anc.append(q)
+            try: q = int(open('/proc/%d/stat' % q).read().rsplit(')', 1)[1].split()[1])
+            except (OSError, ValueError, IndexError): break
+        tok = '%d%04d' % (os.getpid(), random.randrange(10000))
+        import base64
+        J = dict(who=a.who or anc, at=at, id=tok)
+        open(CMDF, 'w').write('press:' + base64.urlsafe_b64encode(json.dumps(J).encode()).decode()); os.kill(pid, signal.SIGUSR1)
+        f = _RUN + '.pressed-' + tok
+        for _ in range(int(10 * (6 + 1.2 * len(at)))):
+            time.sleep(.1)
+            if os.path.exists(f):
+                R = json.load(open(f)); os.unlink(f)
+                if R['error']: print('ohaiku:', R['error']); sys.exit(1)
+                print('%s pressed: %s' % (R['who'], ' '.join(n for n, *_ in R['pressed']))); return
+        print('ohaiku did not finish pressing in time'); sys.exit(1)
     if a.status:
         if not pid: print('ohaiku is not running'); return
         try: os.unlink(_RUN + '.status')
