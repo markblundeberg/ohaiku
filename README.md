@@ -22,7 +22,7 @@ so the chibis can be see-through (Cinnamon, KDE, Xfce with compositing on, GNOME
 desktops are untested.
 
 ```sh
-sudo apt install python3-gi gir1.2-gtk-3.0 python3-gi-cairo python3-xlib python3-pil wmctrl ffmpeg pulseaudio-utils curl
+sudo apt install python3-gi gir1.2-gtk-3.0 python3-gi-cairo python3-xlib python3-pil wmctrl ffmpeg pulseaudio-utils curl gir1.2-atspi-2.0
 git clone https://github.com/markblundeberg/ohaiku && cd ohaiku
 ./install.sh          # fetches the sprites (~45 MB) and adds "Load Up Haiku" to the menu
 ./ohaiku --agents     # a chibi for each Claude Code session (add this to your startup apps)
@@ -35,13 +35,16 @@ uses its `claude` command.
 
 - **What it reads**: `~/.claude/sessions/*.json` and the tails of the transcripts in `~/.claude/projects/`, read-only,
   to see what each session is doing. It never writes to Claude Code's files and needs no hooks.
-- **What it writes**: `~/.config/ohaiku/` (the movie programme, the gallery's skip list), `~/.cache/ohaiku/`,
+- **What it writes**: `~/.config/ohaiku/` (the movie programme, the gallery's skip list, the press switch), `~/.cache/ohaiku/`,
   `~/.local/share/ohaiku/gallery/` (the gallery's notebook), small pid/command files in `$XDG_RUNTIME_DIR`, and two
   menu entries in `~/.local/share/applications/` (`install.sh`).
 - **The network**: `install.sh` downloads the sprite pack from this repo's latest release. Movie night streams URLs you
   put in its programme with yt-dlp. The **Peanut Gallery**, off unless the user turns it on, sends redacted screenshots
   to Haiku through the user's own Claude Code login (`claude -p`); read the gallery section below with them before they
   turn it on. Nothing else goes anywhere.
+- **Hands**: `ohaiku --press` and `--type` make real clicks and keystrokes on the user's desktop. They're off until the
+  user ticks *Let Agents Press Buttons and Type* in the tray menu; there's no command-line way to turn that on, on
+  purpose. Ask them; don't create the file it keeps.
 - **Checks**: an X11 session and a compositor (without one, the chibis sit in black squares). If the sprites can't be
   downloaded, bake them (below; it needs Node and Chrome).
 - **Nice to set up**: autostart `ohaiku --agents`; a hotkey for `ohaiku --toggle` (hide/show); the gallery's skip list
@@ -108,9 +111,30 @@ Left-click it to switch between Play and Perch.
 |---|---|
 | **Perch** | the bottom edge; free ones wander a little; duck from the pointer |
 | **Follow** | oneko: a conga line after the pointer; sleepers wake up |
-| **Recess** | shimeji: they leap onto the title bars of your real windows (`world.py` reads which window tops are visible, through python-xlib), walk along them, hop between them, ride along when you drag a window, and fall off with a "!" when it closes or something covers their spot. Working agents pick a spot and keep working there. With everything maximized there are no title bars to stand on, so they play on the floor |
+| **Recess** | shimeji: they leap onto the title bars of your real windows (`world.py` reads which window tops are visible, through python-xlib), walk along them, hop between them, ride along when you drag a window, and fall off with a "!" when it closes or something covers their spot. Working agents go to the window their work is in: their session's terminal (found by its title), or the browser while the session drives it with Claude in Chrome (and for 40 s after its last step there), or the focused window for computer use. With everything maximized there are no title bars to stand on, so they play on the floor |
 | **Tag** | one Haiku surfs your pointer on an XP arrow ("Cursor is now connected"); the rest run from it, slipping along the screen edges when cornered. Touch one and it's It: it chases the pointer until it tags you back |
 | **Bloomcore** | the eruption from the *Load Up Haiku* music video: ten more Haikus burst out of the tray and fly onto your windows, everyone dances, and one of the twelve flowers opens wherever a Haiku lands. Leaving Bloomcore folds the extras back into flowers |
+
+**Hands** (off until you tick *Let Agents Press Buttons and Type* in the tray menu): a session can press real buttons and
+type into real fields through its chibi.
+
+```sh
+ohaiku --press 7 × 6 = --in Calculator                          # hop onto each button and stomp: each stomp is the click
+ohaiku --type hello --into Message --in Chat --then Send       # stomp into the field, drum the text in
+ohaiku --press-at 1200 640                                      # a bare screen point
+```
+
+The chibi of the session that ran the command (found through its process; `--who NAME` for another) leaps onto each
+button, squashes, and throws up a ポチッ (the sound of pressing a button), and at the moment it lands a real click goes in
+(XTest; the pointer goes back where it was). Typing is the drum: one real keystroke a beat, each letter flying up off it.
+Buttons and fields are found by their accessible names through AT-SPI (`ui.py`, read-only, the way a screen reader finds
+them; `python3 ui.py "Calculator"` lists what a window offers). GTK and Qt apps answer as they are; Chromium answers when
+started with `--force-renderer-accessibility`.
+
+What keeps it careful: the window is raised first, and nothing is pressed if another window covers any of the buttons (a
+real click goes to whatever is on top). Before every keystroke it checks the window still has the focus, and stops if
+not. It types plain ASCII only and never looks for password fields. If you move the mouse during a stomp, that click can
+miss.
 
 **Lemmings** ("Let's go!"): `--lemmings` or the menu. A trapdoor opens above your highest window and ten small Haikus
 drop out one by one and march: off window edges, down onto whatever is below, round at the screen sides, towards a

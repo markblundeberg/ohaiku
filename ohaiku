@@ -31,6 +31,9 @@
   ohaiku --studying   "Nothing! Studying!": everyone vacuumed into the tray, silently (also: shake the mouse)
   ohaiku --hide       vanish (they keep watching); --show to come back; --toggle for a hotkey
   ohaiku --quiet      no ding;  --scale 1.3  bigger (when starting)
+  ohaiku --press 7 × 6 = --in Calculator   your session's chibi stomps on those buttons: each stomp is a real click
+  ohaiku --type TEXT --into FIELD --in TITLE [--then BUTTON...]   ...stomps into a field and drums the text in
+                      (both off until you tick "Let Agents Press Buttons and Type" in the tray menu)
   ohaiku --quit       Haikus, go home;  --restart  go home and come back (agents only);  --status  what they're up to
 
 Every Claude Code session on this machine that was active in the last two hours gets a chibi of its own model, with
@@ -930,6 +933,7 @@ HAIKU = [   # (when, the haiku): now and then a free one says one. 'fall', 'nigh
 SURPRISE_EVERY = {'haiku': 4 * 3600, 'wave': 6 * 3600, 'dvd': 8 * 3600}   # on average, seconds of you being there per surprise
 
 PROGRAMME = os.path.expanduser('~/.config/ohaiku/programme.txt')
+LET_PRESS = os.path.expanduser('~/.config/ohaiku/let-agents-press')    # there = agents may press buttons and type (set from the menu only)
 PROGRAMME_DEFAULT = """# Haiku Theater 3000's programme. One per line: a video file, a folder (every video in it), or a URL (streamed
 # with yt-dlp). Played muted, in random order. You can also drag a video onto the theater window to put it on next.
 ~/Videos
@@ -2268,10 +2272,18 @@ class App:
         c.y = ny
 
     # -- pressing buttons: a session's chibi hops onto each one and stomps, and the stomp is the click -------------
+    def let_press(self, on):
+        try:
+            if on: os.makedirs(os.path.dirname(LET_PRESS), exist_ok=True); open(LET_PRESS, 'w').write('set from the tray menu\n')
+            elif os.path.exists(LET_PRESS): os.unlink(LET_PRESS)
+        except OSError as e: print('ohaiku:', e, file=sys.stderr)
+
     def press_cmd(self, arg):
         """press:{"who": [pids...] or name, "at": [[name, x, y, w, h], ...], "id": token}"""
         try: J = json.loads(arg)
         except ValueError: return
+        if not os.path.exists(LET_PRESS):
+            self.press_report(J.get('id'), None, [], 'pressing is off (tray menu: Let Agents Press Buttons and Type)'); return
         who, cs = J.get('who'), [c for c in self.agents.values() if c.agent.kind == 'session' and not c.gone]
         c = next((c for c in cs if isinstance(who, list) and c.agent.pid in who), None) or \
             next((c for c in cs if who in (c.agent.names or []) + [c.agent.name]), None) or \
@@ -2699,6 +2711,8 @@ class App:
         m.append(ck)
         ag = Gtk.CheckMenuItem(label='Show Agents'); ag.set_active(self.show_agents)
         ag.connect('toggled', lambda w: setattr(self, 'show_agents', w.get_active())); m.append(ag)
+        lp = Gtk.CheckMenuItem(label='Let Agents Press Buttons and Type'); lp.set_active(os.path.exists(LET_PRESS))
+        lp.connect('toggled', lambda w: self.let_press(w.get_active())); m.append(lp)
         m.append(Gtk.SeparatorMenuItem())
         item('Haikus, Go Home', self.quit)
         m.show_all()
@@ -2752,6 +2766,8 @@ def main():
         a.press, a.field = [a.into], True
     if a.press or a.press_at:
         if not pid: print('ohaiku is not running'); sys.exit(1)
+        if not os.path.exists(LET_PRESS):
+            print("ohaiku: pressing is off. The person at this desktop can turn it on: tray menu, 'Let Agents Press Buttons and Type'."); sys.exit(1)
         if a.press_at: at = [['(%d, %d)' % tuple(a.press_at), a.press_at[0] - 20, a.press_at[1] - 20, 40, 40]]
         else:
             if not a.within: print('--press needs --in TITLE (part of the window title)'); sys.exit(2)
