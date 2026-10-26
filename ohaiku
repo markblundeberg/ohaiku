@@ -2803,14 +2803,21 @@ def main():
     modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery', 'leaves') if getattr(a, m)]
     pid = running_pid()
     if a.typing is not None:
-        if not a.into or not a.within: print('--type needs --into FIELD and --in TITLE'); sys.exit(2)
+        if not a.within or not (a.into or a.press_at): print('--type needs --in TITLE, and --into FIELD or --press-at X Y'); sys.exit(2)
         if any(not (32 <= ord(ch) < 127 or ch == '\n') for ch in a.typing): print('--type: plain ASCII only, for now'); sys.exit(2)
-        a.press, a.field = [a.into], True
+        if a.into: a.press, a.field = [a.into], True
     if a.press or a.press_at:
         if not pid: print('ohaiku is not running'); sys.exit(1)
         if not os.path.exists(LET_PRESS):
             print("ohaiku: pressing is off. The person at this desktop can turn it on: tray menu, 'Let Agents Press Buttons and Type'."); sys.exit(1)
-        if a.press_at: at = [['(%d, %d)' % tuple(a.press_at), a.press_at[0] - 20, a.press_at[1] - 20, 40, 40]]
+        if a.press_at:
+            at = [['(%d, %d)' % tuple(a.press_at), a.press_at[0] - 20, a.press_at[1] - 20, 40, 40]]
+            if a.within:                          # a point in a named window: it must be on top there
+                import world
+                top = next((v for v in reversed(world.Surfaces().windows()) if v[1] <= a.press_at[0] < v[1] + v[3] and v[2] <= a.press_at[1] < v[2] + v[4]), None)
+                if top is None or a.within.lower() not in top[6].lower():
+                    print('ohaiku: %s is covered by %r; not pressing anything' % (at[0][0], top[6] if top else 'nothing')); sys.exit(1)
+            if a.typing is not None: at.append(dict(type=a.typing, win=a.within))
         else:
             if not a.within: print('--press needs --in TITLE (part of the window title)'); sys.exit(2)
             import ui, world
