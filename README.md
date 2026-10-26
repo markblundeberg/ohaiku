@@ -85,8 +85,8 @@ How it knows: `agents.py` reads the tails of the transcripts in `~/.claude/proje
 right now and whether the process is still running, so a session that's open shows up however long it has been quiet, and
 one you close leaves. When Claude Code is stuck on you, the record says `waiting` and what for (`waitingFor`: a
 permission prompt, input needed, a dialog...); that's how a permission prompt shows without any hooks. Usage limits and
-API errors come from the transcript (Claude Code writes them as synthetic assistant messages, with the reset time). A tool call is only written to the transcript when it finishes, so while a long tool runs the chibi
-shows the last tool used (busy, so never mistaken for idle). Sessions without a live record (Claude Desktop) fall back to
+API errors come from the transcript (Claude Code writes them as synthetic assistant messages, with the reset time). A tool call is written to the transcript as it starts (checked October 2026; its result comes when it finishes),
+and while it runs the chibi shows it (busy, so never mistaken for idle). Sessions without a live record (Claude Desktop) fall back to
 the transcripts alone.
 
 New pets announce themselves in an XP-style balloon: *Found New Hardware: Haiku 5.5. Your new Haiku is installed and
@@ -130,6 +130,12 @@ button, squashes, and throws up a ポチッ (the sound of pressing a button), an
 Buttons and fields are found by their accessible names through AT-SPI (`ui.py`, read-only, the way a screen reader finds
 them; `python3 ui.py "Calculator"` lists what a window offers). GTK and Qt apps answer as they are; Chromium answers when
 started with `--force-renderer-accessibility`.
+
+**Browser echo** (always on; it only draws): when a session drives Chrome with Claude in Chrome, each click it makes
+gets a stomp from its chibi at the spot on screen where it landed, and typing gets the drum. The click is the tool's own;
+the chibi only shows it, about a second later. The spot comes from the tool call's coordinates, the frame of the latest
+screenshot, and the topmost Chrome window (the page fills the bottom of the window as shown, without Chrome's shadow).
+It's right when the driven tab is the one in front.
 
 What keeps it careful: the window is raised first, and nothing is pressed if another window covers any of the buttons (a
 real click goes to whatever is on top). Before every keystroke it checks the window still has the focus, and stops if

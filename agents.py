@@ -23,6 +23,7 @@ DONE_S, SLEEP_S = 25, 20 * 60
 SKIP = {'last-prompt', 'custom-title', 'agent-name', 'mode', 'permission-mode', 'atis-latch', 'bridge-session',
         'attachment', 'file-history-snapshot', 'queue-operation', 'summary', 'progress'}
 ASK_TOOLS = {'AskUserQuestion', 'ExitPlanMode'}
+FRAME = (re.compile(r'coordinate frame: (\d+)x(\d+)'), re.compile(r'captured screenshot \((\d+)x(\d+)'))   # what a browser screenshot's coordinates are in (a scaled one says so)
 
 
 class Agent:
@@ -60,6 +61,7 @@ def _parse(path):
     if c and c[0] == st.st_mtime and c[1] == st.st_size: return c[2]
     ents = _tail_entries(path)
     state, tool, last_tool, model, title, aname, cwd = None, None, None, None, None, None, None
+    last_use, frame = None, None                      # the newest tool call (id, name, input, when); the newest screenshot's frame
     sends = []                                        # recent SendMessage calls: (tool_use id, to, timestamp)
     ai, entry, until = None, None, None
     for e in ents:                                    # newest first
@@ -77,7 +79,15 @@ def _parse(path):
                     sends.append((b.get('id'), str((b.get('input') or {}).get('to', '')), e.get('timestamp', '')))
         if last_tool is None and t == 'assistant':
             lu = [b for b in (m.get('content') or []) if isinstance(b, dict) and b.get('type') == 'tool_use']
-            if lu: last_tool = lu[-1].get('name')
+            if lu:
+                last_tool = lu[-1].get('name')
+                last_use = dict(id=lu[-1].get('id'), name=last_tool, input=lu[-1].get('input') or {}, at=_when(e.get('timestamp')))
+        if frame is None and t == 'user' and isinstance(m.get('content'), list):
+            for b in m['content']:
+                if isinstance(b, dict) and b.get('type') == 'tool_result':
+                    txt = json.dumps(b.get('content'))[:4000]
+                    f = FRAME[0].search(txt) or FRAME[1].search(txt)
+                    if f: frame = (int(f.group(1)), int(f.group(2)))
         if state is not None or t in SKIP: continue
         c = m.get('content')
         if t == 'assistant' and e.get('isApiErrorMessage'):
@@ -94,7 +104,7 @@ def _parse(path):
             else: state = 'think'
         elif t == 'system':
             if e.get('subtype') == 'turn_duration': state = 'free'
-    parsed = dict(state=state or 'free', tool=tool if state in ('tool', 'ask', 'limit', 'error') else None, until=until, last_tool=last_tool, sends=sends, ai=ai, entry=entry, model=model or '', title=title,
+    parsed = dict(state=state or 'free', tool=tool if state in ('tool', 'ask', 'limit', 'error') else None, until=until, last_tool=last_tool, last_use=last_use, frame=frame, sends=sends, ai=ai, entry=entry, model=model or '', title=title,
                   aname=aname, cwd=cwd)
     _cache[path] = (st.st_mtime, st.st_size, parsed)
     return parsed
@@ -245,7 +255,7 @@ def scan(within=2 * 3600, now=None):
         if state in ('limit', 'error') and p['until'] and now > p['until']: state, tool = 'free', None   # it has reset
         if state == 'free': state = 'done' if age < DONE_S else ('asleep' if age > SLEEP_S else 'free')
         out.append(Agent(kind='session', id=sid, parent=None, name=name, names=[n for n in (title, aname) if n], state=state, cwd=p['cwd'] or '',
-                         sends=p['sends'], pid=int(L['pid']) if L else None, sock=(L or {}).get('messagingSocketPath'), live=bool(L), tool=tool, last_tool=p['last_tool'], model=p['model'],
+                         sends=p['sends'], pid=int(L['pid']) if L else None, sock=(L or {}).get('messagingSocketPath'), live=bool(L), tool=tool, last_tool=p['last_tool'], last_use=p['last_use'], frame=p['frame'], model=p['model'],
                          age=age, look=_look(p['model'], sid, 'session'), born=_first_time(path), today=work_today(path)))
         # subagents: shown while they run, and briefly once they finish
         for sp in glob.glob(os.path.join(os.path.dirname(path), sid, 'subagents', 'agent-*.jsonl')):

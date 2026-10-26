@@ -74,6 +74,7 @@ TOOL_PREFIX = {'mcp__': 'search'}
 # Recess: a working chibi goes to the window its work is in. These tools work in a browser, or on whatever has focus;
 # everything else happens in its session's terminal.
 BROWSER_TOOLS = ('mcp__claude-in-chrome__',)
+CLICKS = ('left_click', 'double_click', 'triple_click', 'right_click')    # browser clicks a chibi shows with a stomp
 SCREEN_TOOLS = ('mcp__computer-use__',)
 WORK = {'think', 'ask', 'done', 'bash', 'read', 'search', 'edit', 'agents', 'busy', 'tea', 'dizzy'}
 GAL_GAP, GAL_IDLE = 6, 300                           # the Peanut Gallery looks soon after the screen changes, but at most
@@ -183,6 +184,7 @@ class Chibi:
         self.next_hop, self.goal, self.settled = None, None, False
         self.browsing_until = 0.0                         # recess: still the browser's, between its browser steps
         self.press, self.pochi_t = None, -9.0             # pressing buttons for its session (App.press_tick); when its last stomp landed
+        self.echoed, self.shot = None, None               # the last browser action it showed; its session's browser screenshot frame (w, h)
         self.W = self.cpx + 40 if label else self.cpx
         self.H = self.cpx + (LABEL_H if label else 0)
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
@@ -1008,7 +1010,7 @@ class Burst:
         lay.set_font_description(Pango.FontDescription('Sans Heavy %d' % int(24 * k)))
         lay.set_text(self.word, -1); tw, th = lay.get_pixel_size()
         cr.save(); cr.translate(c + self.dx * e * k, c - k * (40 + 95 * e)); cr.rotate(.3 * self.dx / 40 * e)
-        s = min(1, t / .08) * (1.15 - .3 * e); cr.scale(s, s); cr.translate(-tw / 2, -th / 2)
+        s = max(.05, min(1, t / .08)) * (1.15 - .3 * e); cr.scale(s, s); cr.translate(-tw / 2, -th / 2)
         PangoCairo.layout_path(cr, lay); cr.set_line_join(cairo.LINE_JOIN_ROUND)
         a = max(0, 1 - max(0, t - .5) / (self.T - .5))
         cr.set_source_rgba(.29, .17, .11, a); cr.set_line_width(k * 5); cr.stroke_preserve()
@@ -1356,6 +1358,7 @@ class App:
         self.surfaces, self.world_ok = [], True
         self.wins, self.active_win = [], None             # every window (id, x, y, w, h, class, title), for workplace()
         self.bursts = []                                  # the ポチッ where a stomp lands
+        self.rects = {}                                   # what each window shows (no shadow): id -> (x, y, w, h)
         self.shake, self.studying, self.peeker = [], None, None
         self.balloons, self.surfer, self.it, self.it_t = [], None, 'you', 0.0     # tag
         self.flowers, self.party = [], []                                          # bloomcore
@@ -1395,7 +1398,7 @@ class App:
             if self.music_on and time.time() - last_music > 2:
                 last_music = time.time(); m = self.listen()
                 if m != self.music: GLib.idle_add(self.set_music, m)
-            time.sleep(1.5)
+            time.sleep(.4 if time.time() < getattr(self, 'browsing_until', 0) else 1.5)     # quicker while someone drives the browser
 
     def watch_world(self):
         try:
@@ -1418,7 +1421,7 @@ class App:
             if (self.mode in ('recess', 'bloomcore', 'lemmings') or self.snow) and not self.hidden:
                 try:
                     GLib.idle_add(self.set_surfaces, W.poll())
-                    if time.time() - last_wins > .5: last_wins = time.time(); GLib.idle_add(self.set_wins, W.windows(), W.active())
+                    if time.time() - last_wins > .5: last_wins = time.time(); GLib.idle_add(self.set_wins, W.windows(), W.active(), W.rects())
                 except Exception as e: print('ohaiku: world:', e, file=sys.stderr)
                 time.sleep(.12)
             else:
@@ -1433,8 +1436,8 @@ class App:
     def set_surfaces(self, s):
         self.surfaces = s; return False
 
-    def set_wins(self, wins, active):
-        self.wins, self.active_win = wins, active; return False
+    def set_wins(self, wins, active, rects=()):
+        self.wins, self.active_win, self.rects = wins, active, {r[0]: r[1:] for r in rects}; return False
 
     def is_locked(self):
         if os.environ.get('OHAIKU_IGNORE_LOCK'): return False          # testing on a nested X server
@@ -1615,6 +1618,7 @@ class App:
         if self.mode == 'lemmings' and self.game: self.lem_tick(dt)
         fl = self.floor()
         self.bursts = [b for b in self.bursts if b.tick(dt)]
+        for c in list(self.agents.values()): self.echo(c)
         for c, tx, ty in list(self.targets(cx, cy)):
             if c.press: self.press_tick(c, dt)
             elif c.arc or c.falling: self.air(c, dt)
@@ -2295,6 +2299,43 @@ class App:
         c.press = dict(jobs=collections.deque(J['at']), id=J.get('id'), log=[], stage='go', hold=0.0, n=0)
         c.win.input_shape_combine_region(cairo.Region())            # click-through all over, plate too: the click goes to the button
 
+    def echo(self, c):
+        """a session drives the browser (Claude in Chrome): its chibi shows each click with a stomp where it lands, and
+        types with its drum. Only a picture of what the tool does; the clicks and keys are the tool's own."""
+        a = c.agent
+        if a is None or a.kind != 'session': return
+        if getattr(a, 'frame', None): c.shot = a.frame
+        lu = getattr(a, 'last_use', None)
+        if not lu or lu['id'] == c.echoed: return
+        first, c.echoed = c.echoed is None, lu['id']
+        if first or time.time() - lu['at'] > 8 or not lu['name'].startswith(BROWSER_TOOLS): return     # (not replaying old ones)
+        self.browsing_until = time.time() + 60
+        if lu['name'].endswith('__computer'): acts = [lu['input']]
+        elif lu['name'].endswith('__browser_batch'): acts = [x.get('input') or {} for x in lu['input'].get('actions', []) if str(x.get('name', '')).endswith('computer')]
+        else: return
+        jobs = []
+        for A in acts:
+            if A.get('action') in CLICKS and A.get('coordinate'):
+                p = self.on_screen(c.shot, A['coordinate'])
+                if p: jobs.append(['(browser)', p[0] - 18, p[1] - 18, 36, 36, 'echo'])
+            elif A.get('action') == 'type' and A.get('text'):
+                jobs.append(dict(type=str(A['text'])[:80], win=None, echo=True))
+        if not jobs or self.hidden or self.locked or self.mode in ('tag', 'lemmings'): return
+        if c.press: c.press['jobs'].extend(jobs); return
+        c.arc, c.falling, c.goal, c.on = None, False, None, None
+        c.press = dict(jobs=collections.deque(jobs), id=None, log=[], stage='go', hold=0.0, n=0)
+        c.win.input_shape_combine_region(cairo.Region())
+
+    def on_screen(self, frame, pt):
+        """a point in a browser screenshot's coordinates -> the screen: the viewport fills the bottom of the topmost
+        Chrome window, at the frame's aspect"""
+        if not frame: return None
+        wid = next((w[0] for w in reversed(self.wins) if 'chrom' in w[5].lower()), None)
+        if wid is None or wid not in self.rects: return None
+        x, y, w, h = self.rects[wid]; s = w / frame[0]; vh = frame[1] * s        # (the window as shown: Chrome's shadow left out)
+        if vh > h: return None
+        return x + pt[0] * s, y + h - vh + pt[1] * s
+
     def press_tick(self, c, dt):
         P = c.press
         if c.arc: self.air(c, dt); return
@@ -2305,19 +2346,20 @@ class App:
             return
         if not P['jobs']: self.press_end(c); return
         if isinstance(P['jobs'][0], dict): self.type_tick(c, dt); return
-        nm, x, y, w, h = P['jobs'][0]
+        nm, x, y, w, h, *_ = P['jobs'][0]
         fx, fy = x + w / 2, y + h * .62                             # feet on the button's face, a little below its middle
         d = math.hypot(fx - c.x, fy - c.y)
-        c.arc = dict(x0=c.x, y0=c.y, x1=fx, y1=fy, sid=None, t=0.0, T=(.32 if P['n'] else .55) + d / 2200,
+        quick = len(P['jobs'][0]) > 5                               # an echo: the click already happened, so hurry
+        c.arc = dict(x0=c.x, y0=c.y, x1=fx, y1=fy, sid=None, t=0.0, T=(.22 if quick else .32 if P['n'] else .55) + d / (3200 if quick else 2200),
                      h=(55 if P['n'] else 150) + .2 * d, press=True)
         c.set('leap'); P['stage'] = 'air'
 
     def pochi(self, c):
         """the stomp: squash, the burst, and the real click at the button's centre"""
-        P = c.press; nm, x, y, w, h = P['jobs'].popleft(); P['n'] += 1
+        P = c.press; nm, x, y, w, h, *echo = P['jobs'].popleft(); P['n'] += 1
         c.pochi_t = time.time(); c.set('done')
         self.bursts.append(Burst(self, x + w / 2, y + h * .62, c.sc, P['n']))
-        self.click(x + w / 2, y + h / 2)
+        if not echo: self.click(x + w / 2, y + h / 2)              # (an echo shows a click the browser tool already made)
         P['log'].append([nm, round(x + w / 2), round(y + h / 2), round(time.time(), 3)])
         P['stage'], P['hold'] = 'hold', (.22 if P['jobs'] else .8)
 
@@ -2330,11 +2372,11 @@ class App:
         if J['i'] >= len(J['type']):
             P['jobs'].popleft(); P['log'].append(['typed ' + repr(J['type']), 0, 0, round(time.time(), 3)])
             P['stage'], P['hold'] = 'hold', .5; return
-        if not self.focused(J['win']):                   # someone else has the keyboard: stop typing, at once
+        if not J.get('echo') and not self.focused(J['win']):     # someone else has the keyboard: stop typing, at once
             P['err'] = 'stopped typing after %d of %d characters: %r no longer has the focus' % (J['i'], len(J['type']), J['win'])
             P['jobs'].clear(); return
         ch = J['type'][J['i']]; J['i'] += 1
-        self.key(ch)
+        if not J.get('echo'): self.key(ch)
         if ch.strip(): self.bursts.append(Burst(self, c.x, c.y - c.cpx * .45, c.sc, J['i'], key=ch))
         J['next'] = random.uniform(.07, .16) if ch != ' ' else .22
 
