@@ -52,6 +52,8 @@ uses its `claude` command.
 
 ## The agents
 
+<img align="right" src="docs/tanpopo-read.png" width="112" alt="tanpopo, a chibi in a dandelion hood, reading">
+
 Every Claude Code session on this machine that was active in the last two hours gets a chibi of its own model (chibi
 Opus for Opus, Haiku for Haiku) with its name on a little plate, standing on the bottom edge of the screen and acting out
 what it's doing:
@@ -114,6 +116,8 @@ Left-click it to switch between Play and Perch.
 | **Recess** | shimeji: they leap onto the title bars of your real windows (`world.py` reads which window tops are visible, through python-xlib), walk along them, hop between them, ride along when you drag a window, and fall off with a "!" when it closes or something covers their spot. Working agents go to the window their work is in: their session's terminal (found by its title), or the browser while the session drives it with Claude in Chrome (and for 40 s after its last step there), or the focused window for computer use. With everything maximized there are no title bars to stand on, so they play on the floor |
 | **Tag** | one Haiku surfs your pointer on an XP arrow ("Cursor is now connected"); the rest run from it, slipping along the screen edges when cornered. Touch one and it's It: it chases the pointer until it tags you back |
 | **Bloomcore** | the eruption from the *Load Up Haiku* music video: ten more Haikus burst out of the tray and fly onto your windows, everyone dances, and one of the twelve flowers opens wherever a Haiku lands. Leaving Bloomcore folds the extras back into flowers |
+
+<img align="right" src="docs/tanpopo-press.gif" width="280" alt="A chibi in a dandelion hood hops across a calculator's keys, stomping each (ポチッ), while the display goes 1, 12, 12×, 12×3, 36">
 
 **Hands** (off until you tick *Let Agents Press Buttons and Type* in the tray menu): a session can press real buttons and
 type into real fields through its chibi.
@@ -282,6 +286,8 @@ state so only the states in use are loaded. `sprites/poses.js` holds the states;
 draws the agent poses for a quick look (`testSheet6`: the gallery row and the tea break). A partial bake
 (`--states a,b`) adds to `sheets.json` rather than replacing it. The kit gained a `read` and a `search` prop and a `pose.arms` override for this. Fable isn't here yet: Fable gets to design itself.
 
+<img align="right" src="docs/tanpopo-done.png" width="128" alt="tanpopo bouncing for a finished job while seeds lift off the seed clock">
+
 **Your own looks.** A session can have a look of its own, drawn on the same rig, so it keeps every pose. Put a file in
 `~/.config/ohaiku/looks/` that calls `ohLook('name', {...})`, starting from a chibi Opus: new colours (`colors`,
 `V`), or hooks that draw over or instead of parts (`petals` for the hood, `clip` for the star clip, `behind`, `body`,
@@ -290,8 +296,11 @@ Hooks see the state being drawn, so a prop can move while the session works and 
 bakes a look several ways, for example by the time of day, and `runtime: {companion: {color}}` adds a dot that ohaiku
 draws live, drifting around the character. `node preview.mjs out.png look:name` shows a design without baking it, and
 `node bake.mjs --who looks` bakes them all into `share/look-<name>`. A session whose name (minus any emoji) matches
-a baked look wears it; ohaiku checks once a minute, so a rename takes effect within a minute. The looks stay on
-your machine: this repo has only the hooks.
+a baked look wears it; ohaiku checks once a minute, so a rename takes effect within a minute. Looks stay on your
+machine, with one exception: [`looks/tanpopo.js`](looks/tanpopo.js), a dandelion (*tanpopo* in Japanese) that the
+session it was made for drew for itself and chose to share. It's the one in the pictures here: a dandelion-gold hood,
+a seed clock in place of the star clip, and when a job is done a few seeds lift off and drift away. Copy it into your
+looks folder to try it, or as a start on your own.
 
 ## Showreel
 
