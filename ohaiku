@@ -45,7 +45,7 @@ for the menu. Middle-click the tray icon to hide or show everyone.
 
 X11 with a compositor. Every window is click-through.
 """
-import argparse, array, collections, json, math, os, random, re, signal, subprocess, sys, threading, time
+import argparse, array, collections, json, math, os, random, re, signal, subprocess, sys, threading, time, zlib
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 SHARE = os.path.join(HERE, 'share')
@@ -68,6 +68,10 @@ TOOL_POSE = {
     'AskUserQuestion': 'ask', 'ExitPlanMode': 'ask', 'PushNotification': 'ask',
 }
 TOOL_PREFIX = {'mcp__': 'search'}
+# Recess: a working chibi goes to the window its work is in. These tools work in a browser, or on whatever has focus;
+# everything else happens in its session's terminal.
+BROWSER_TOOLS = ('mcp__claude-in-chrome__',)
+SCREEN_TOOLS = ('mcp__computer-use__',)
 WORK = {'think', 'ask', 'done', 'bash', 'read', 'search', 'edit', 'agents', 'busy', 'tea', 'dizzy'}
 GAL_GAP, GAL_IDLE = 6, 300                           # the Peanut Gallery looks soon after the screen changes, but at most
                                                       # once every GAL_GAP s; and once in GAL_IDLE s even if nothing has
@@ -85,6 +89,11 @@ def running_pid():
         return pid
     except (OSError, ValueError):
         return None
+
+
+def bare_title(t):
+    """a terminal title without Claude Code's ✳ / spinner in front: what to match a session's name against"""
+    return t[1:].strip() if t[:1] and not t[0].isalnum() else t
 
 
 def clip(s, n):
@@ -169,6 +178,7 @@ class Chibi:
         self.shrink, self.spin = 1.0, 0.0                 # the vacuum ("Nothing! Studying!")
         self.on, self.off, self.arc, self.vy, self.falling = None, 0.0, None, 0.0, False   # recess: which window top
         self.next_hop, self.goal, self.settled = None, None, False
+        self.browsing_until = 0.0                         # recess: still the browser's, between its browser steps
         self.W = self.cpx + 40 if label else self.cpx
         self.H = self.cpx + (LABEL_H if label else 0)
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
@@ -1256,6 +1266,7 @@ class App:
         self.tk = 0
         self.show_agents = not a.no_agents
         self.surfaces, self.world_ok = [], True
+        self.wins, self.active_win = [], None             # every window (id, x, y, w, h, class, title), for workplace()
         self.shake, self.studying, self.peeker = [], None, None
         self.balloons, self.surfer, self.it, self.it_t = [], None, 'you', 0.0     # tag
         self.flowers, self.party = [], []                                          # bloomcore
@@ -1309,14 +1320,16 @@ class App:
             idle = lambda: W.d.screensaver_query_info(W.root).idle / 1000
         except Exception:
             idle = lambda: 0.0
-        last_idle = 0
+        last_idle = last_wins = 0
         while True:
             if time.time() - last_idle > 1:
                 last_idle = time.time()
                 try: GLib.idle_add(self.set_idle, idle())
                 except Exception: pass
             if (self.mode in ('recess', 'bloomcore', 'lemmings') or self.snow) and not self.hidden:
-                try: GLib.idle_add(self.set_surfaces, W.poll())
+                try:
+                    GLib.idle_add(self.set_surfaces, W.poll())
+                    if time.time() - last_wins > .5: last_wins = time.time(); GLib.idle_add(self.set_wins, W.windows(), W.active())
                 except Exception as e: print('ohaiku: world:', e, file=sys.stderr)
                 time.sleep(.12)
             else:
@@ -1330,6 +1343,9 @@ class App:
 
     def set_surfaces(self, s):
         self.surfaces = s; return False
+
+    def set_wins(self, wins, active):
+        self.wins, self.active_win = wins, active; return False
 
     def is_locked(self):
         if os.environ.get('OHAIKU_IGNORE_LOCK'): return False          # testing on a nested X server
@@ -2156,6 +2172,21 @@ class App:
         if ny >= fl: self.land(c, None, fl); return
         c.y = ny
 
+    def workplace(self, c):
+        """the window this chibi's work is in right now: the browser while its session drives one (and for a little
+        while after, so it doesn't run home between steps), the focused window for computer use, else its terminal"""
+        a = c.agent
+        if a is None or c.work() in (None, 'sleep'): return None
+        tool, now = (a.tool if a.state == 'tool' else getattr(a, 'last_tool', None)) or '', time.time()   # (a quick tool goes by between scans)
+        if tool.startswith(BROWSER_TOOLS): c.browsing_until = now + 40
+        if now < c.browsing_until:
+            ws = [w for w in self.wins if 'chrom' in w[5].lower()]
+            if ws: return ws[-1][0]                                     # the topmost browser window
+        if tool.startswith(SCREEN_TOOLS): return self.active_win
+        if a.kind == 'sub' and a.parent in self.agents: a = self.agents[a.parent].agent    # a helper works in its session's
+        names = set(a.names or [a.name])
+        return next((w[0] for w in reversed(self.wins) if bare_title(w[6]) in names), None)
+
     def recess(self, c, dt, fl):
         wa = self.workarea()
         s = self.surface(c.on) if c.on else None
@@ -2165,6 +2196,14 @@ class App:
         else: c.y = fl
         now = time.time()
         free = c.work() is None
+        home = self.workplace(c)
+        if home is not None:
+            t = self.surface(home)
+            if c.on == home: c.settled = True                           # at work: stay
+            elif t and t.y > wa.y + c.cpx * .9 and c.state not in ('sleep', 'yawn', 'wake', 'alert'):
+                a, b = max(t.segs, key=lambda g: g[1] - g[0])           # off to work: its window's widest open stretch,
+                k = (zlib.crc32((c.agent.name or '').encode()) % 7) / 6     # each at its own spot along it
+                self.leap(c, a + 40 + max(0, b - a - 80) * (.55 + .4 * k), t.y, home); return
         if c.next_hop is None: c.next_hop = now + random.uniform(.3, 3)
         if now > c.next_hop and c.state not in ('sleep', 'yawn', 'wake', 'alert') and (free or not c.settled):
             c.settled = True
@@ -2270,9 +2309,7 @@ class App:
         for ln in wins:
             parts = ln.split(None, 3)
             if len(parts) < 4: continue
-            title = parts[3]
-            if title[:1] and not title[0].isalnum(): title = title[1:].strip()      # Claude Code's ✳ / spinner
-            if title in names:
+            if bare_title(parts[3]) in names:
                 subprocess.Popen(['wmctrl', '-i', '-a', parts[0]]); return
         # not in a terminal here: the Desktop app's "Sessions Waiting for You" (opens it if it's closed)
         url = 'claude://code/needs-input?source=desktop_action' if a.state in ('ask', 'done', 'free') else 'claude://code/continue?session=last&source=desktop_action'
@@ -2404,7 +2441,9 @@ class App:
                 st = dict(mode=self.mode, hidden=self.hidden, locked=self.locked, gallery=self.gal_why if self.gallery_on else 'off',
                           looks=getattr(self, 'gal_looks', 0), cast=[n for n, _ in self.gal_cast] if self.gallery_on else [],
                           agents={c.agent.name: c.agent.state + (':' + c.agent.tool if c.agent.tool else '') for c in self.agents.values()},
-                          pets=len(self.pets), snow=self.snow.kind if self.snow else None, theater=bool(self.theater))
+                          pets=len(self.pets), snow=self.snow.kind if self.snow else None, theater=bool(self.theater),
+                          where={c.agent.name: dict(x=round(c.x), y=round(c.y), on=c.on, home=self.workplace(c), state=c.state)
+                                 for c in self.agents.values()})
                 try: open(_RUN + '.status', 'w').write(json.dumps(st, indent=1) + '\n')
                 except OSError: pass
             elif c.startswith('surprise:'): self.surprise(c[9:])     # (for testing one)

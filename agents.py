@@ -245,7 +245,7 @@ def scan(within=2 * 3600, now=None):
         if state in ('limit', 'error') and p['until'] and now > p['until']: state, tool = 'free', None   # it has reset
         if state == 'free': state = 'done' if age < DONE_S else ('asleep' if age > SLEEP_S else 'free')
         out.append(Agent(kind='session', id=sid, parent=None, name=name, names=[n for n in (title, aname) if n], state=state, cwd=p['cwd'] or '',
-                         sends=p['sends'], pid=int(L['pid']) if L else None, sock=(L or {}).get('messagingSocketPath'), live=bool(L), tool=tool, model=p['model'],
+                         sends=p['sends'], pid=int(L['pid']) if L else None, sock=(L or {}).get('messagingSocketPath'), live=bool(L), tool=tool, last_tool=p['last_tool'], model=p['model'],
                          age=age, look=_look(p['model'], sid, 'session'), born=_first_time(path), today=work_today(path)))
         # subagents: shown while they run, and briefly once they finish
         for sp in glob.glob(os.path.join(os.path.dirname(path), sid, 'subagents', 'agent-*.jsonl')):
@@ -266,7 +266,7 @@ def scan(within=2 * 3600, now=None):
             desc = ''
             try: desc = json.load(open(sp[:-6] + '.meta.json')).get('description', '')
             except (OSError, ValueError): pass
-            out.append(Agent(kind='sub', id=aid, parent=sid, name=desc or 'helper', names=[n for n in (title, aname) if n], state=sst, cwd=p['cwd'] or '', sends=q['sends'], pid=None, sock=None, live=False, tool=stool,
+            out.append(Agent(kind='sub', id=aid, parent=sid, name=desc or 'helper', names=[n for n in (title, aname) if n], state=sst, cwd=p['cwd'] or '', sends=q['sends'], pid=None, sock=None, live=False, tool=stool, last_tool=q['last_tool'],
                              model=q['model'], age=sage, look=_look(q['model'], aid, 'sub'), born=_first_time(sp), today=0))
     return out
 
