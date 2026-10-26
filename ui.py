@@ -10,6 +10,7 @@ import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
+FIELDS = {'entry', 'text', 'search box', 'editbar', 'spin button', 'combo box'}    # never 'password text'
 PRESSABLE = {'push button', 'toggle button', 'check box', 'radio button', 'link', 'menu item', 'page tab', 'push button menu'}
 
 
@@ -27,15 +28,15 @@ def windows(title):
                 continue
 
 
-def buttons(root, limit=4000):
-    """(name, x, y, w, h) of every visible pressable thing under root"""
+def buttons(root, limit=4000, roles=PRESSABLE):
+    """(name, x, y, w, h) of every visible pressable thing (or other roles) under root"""
     out, stack, n = [], [root], 0
     while stack and n < limit:
         a = stack.pop(); n += 1
         try:
             role, st = a.get_role_name(), a.get_state_set()
             if not st.contains(Atspi.StateType.SHOWING): continue
-            if role in PRESSABLE:
+            if role in roles:
                 name = (a.get_name() or '').strip()
                 e = a.get_extents(Atspi.CoordType.SCREEN)
                 if name and e.width > 0 and e.height > 0: out.append((name, e.x, e.y, e.width, e.height))
@@ -47,10 +48,10 @@ def buttons(root, limit=4000):
     return out
 
 
-def find(title, names):
+def find(title, names, roles=PRESSABLE):
     """names -> [(name, x, y, w, h)], in order; raises KeyError for one it can't see"""
     for f in windows(title):
-        bs = buttons(f)
+        bs = buttons(f, roles=roles)
         got = []
         for nm in names:
             hit = [b for b in bs if b[0] == nm] or [b for b in bs if b[0].lower() == nm.lower()]

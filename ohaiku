@@ -942,11 +942,12 @@ class Burst:
     a button) popping up beside it. Click-through; gone in under a second."""
     T = .85
 
-    def __init__(self, app, x, y, sc, n):
-        self.app, self.x, self.y, self.t, self.n = app, x, y, 0.0, n
+    def __init__(self, app, x, y, sc, n, key=None):
+        self.app, self.x, self.y, self.t, self.n, self.key = app, x, y, 0.0, n, key
         self.k = max(.7, sc / .82)
         self.side = 1 if n % 2 else -1                     # a run of presses: the word on alternate sides
-        self.word = 'ポチッ' if n == 1 or random.random() < .5 else random.choice(('ポチ', 'ぽち', 'ポン'))
+        self.word = key if key else 'ポチッ' if n == 1 or random.random() < .5 else random.choice(('ポチ', 'ぽち', 'ポン'))
+        if key: self.T, self.dx = 1.0, random.uniform(-40, 40)
         self.S = int(300 * self.k)
         w = self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
         w.set_app_paintable(True)
@@ -966,6 +967,7 @@ class Burst:
         cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint(); cr.set_operator(cairo.OPERATOR_OVER)
         t, k, c = self.t, self.k, self.S / 2
         e = 1 - (1 - min(1, t / .42)) ** 3                 # ease out
+        if self.key: return self.draw_key(cr, t, k, c)
         a = max(0, 1 - t / .5)
         if a > 0:                                         # the ring, lying flat on the button
             r = k * (12 + 62 * e)
@@ -992,6 +994,21 @@ class Burst:
         cr.set_source_rgba(.29, .17, .11, fade); cr.set_line_width(k * 6); cr.stroke_preserve()
         cr.set_source_rgba(1, .84, .25, fade); cr.fill()
         cr.restore()
+        return True
+
+
+    def draw_key(self, cr, t, k, c):
+        """a typed letter, flying up off the drum and fading"""
+        e = 1 - (1 - min(1, t / self.T)) ** 2
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription('Sans Heavy %d' % int(24 * k)))
+        lay.set_text(self.word, -1); tw, th = lay.get_pixel_size()
+        cr.save(); cr.translate(c + self.dx * e * k, c - k * (40 + 95 * e)); cr.rotate(.3 * self.dx / 40 * e)
+        s = min(1, t / .08) * (1.15 - .3 * e); cr.scale(s, s); cr.translate(-tw / 2, -th / 2)
+        PangoCairo.layout_path(cr, lay); cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        a = max(0, 1 - max(0, t - .5) / (self.T - .5))
+        cr.set_source_rgba(.29, .17, .11, a); cr.set_line_width(k * 5); cr.stroke_preserve()
+        cr.set_source_rgba(1, 1, 1, a); cr.fill(); cr.restore()
         return True
 
 
@@ -2269,6 +2286,7 @@ class App:
             if P['hold'] <= 0: P['stage'] = 'go'
             return
         if not P['jobs']: self.press_end(c); return
+        if isinstance(P['jobs'][0], dict): self.type_tick(c, dt); return
         nm, x, y, w, h = P['jobs'][0]
         fx, fy = x + w / 2, y + h * .62                             # feet on the button's face, a little below its middle
         d = math.hypot(fx - c.x, fy - c.y)
@@ -2285,9 +2303,52 @@ class App:
         P['log'].append([nm, round(x + w / 2), round(y + h / 2), round(time.time(), 3)])
         P['stage'], P['hold'] = 'hold', (.22 if P['jobs'] else .8)
 
+    def type_tick(self, c, dt):
+        """typing: drumming where it stands, one real keystroke a beat, each letter flying up off the drum"""
+        P, J = c.press, c.press['jobs'][0]
+        if c.state != 'bash': c.set('bash'); J.setdefault('i', 0); J['next'] = .25
+        J['next'] -= dt
+        if J['next'] > 0: return
+        if J['i'] >= len(J['type']):
+            P['jobs'].popleft(); P['log'].append(['typed ' + repr(J['type']), 0, 0, round(time.time(), 3)])
+            P['stage'], P['hold'] = 'hold', .5; return
+        if not self.focused(J['win']):                   # someone else has the keyboard: stop typing, at once
+            P['err'] = 'stopped typing after %d of %d characters: %r no longer has the focus' % (J['i'], len(J['type']), J['win'])
+            P['jobs'].clear(); return
+        ch = J['type'][J['i']]; J['i'] += 1
+        self.key(ch)
+        if ch.strip(): self.bursts.append(Burst(self, c.x, c.y - c.cpx * .45, c.sc, J['i'], key=ch))
+        J['next'] = random.uniform(.07, .16) if ch != ' ' else .22
+
+    def focused(self, title):
+        try:
+            v = subprocess.run(['xprop', '-root', '_NET_ACTIVE_WINDOW'], capture_output=True, text=True, timeout=1).stdout.split()[-1]
+            t = subprocess.run(['xprop', '-id', v, '_NET_WM_NAME'], capture_output=True, text=True, timeout=1).stdout
+            return title.lower() in t.lower()
+        except (OSError, subprocess.SubprocessError, IndexError):
+            return False
+
+    def key(self, ch):
+        """one real keystroke (XTest) for a printable ASCII character, or Return for a newline"""
+        try:
+            from Xlib import X, XK, display as xdisplay
+            from Xlib.ext import xtest
+            if getattr(self, '_kd', None) is None: self._kd = xdisplay.Display()
+            d = self._kd
+            ks = XK.string_to_keysym('Return') if ch == '\n' else ord(ch)
+            kc = d.keysym_to_keycode(ks)
+            if not kc: return
+            shift = d.keycode_to_keysym(kc, 0) != ks
+            sk = d.keysym_to_keycode(XK.string_to_keysym('Shift_L'))
+            if shift: xtest.fake_input(d, X.KeyPress, sk)
+            xtest.fake_input(d, X.KeyPress, kc); xtest.fake_input(d, X.KeyRelease, kc)
+            if shift: xtest.fake_input(d, X.KeyRelease, sk)
+            d.sync()
+        except Exception as e: print('ohaiku: key:', e, file=sys.stderr)
+
     def press_end(self, c):
         P, c.press = c.press, None
-        self.press_report(P['id'], c.agent.name if c.agent else c.who, P['log'], None)
+        self.press_report(P['id'], c.agent.name if c.agent else c.who, P['log'], P.get('err'))
         c.shape_input(); c.falling, c.vy = True, -520.0; c.set('fall')     # hop off; then back to whatever it was doing
 
     def press_report(self, token, who, log, err):
@@ -2302,7 +2363,7 @@ class App:
                 from Xlib import X, display as xdisplay
                 from Xlib.ext import xtest
                 d = xdisplay.Display(); p = d.screen().root.query_pointer()
-                for ev, arg, wait in ((X.MotionNotify, None, .03), (X.ButtonPress, 1, .06), (X.ButtonRelease, 1, .03), (X.MotionNotify, 'back', 0)):
+                for ev, arg, wait in ((X.MotionNotify, None, .02), (X.ButtonPress, 1, .015), (X.ButtonRelease, 1, .02), (X.MotionNotify, 'back', 0)):   # (short: you may be moving the mouse)
                     if ev == X.MotionNotify:
                         xx, yy = (p.root_x, p.root_y) if arg == 'back' else (int(x), int(y))
                         xtest.fake_input(d, ev, x=xx, y=yy)
@@ -2673,9 +2734,16 @@ def main():
     p.add_argument('--in', dest='within', metavar='TITLE', help='for --press: part of the window title')
     p.add_argument('--press-at', nargs=2, type=int, metavar=('X', 'Y'), help='stomp on this screen point instead')
     p.add_argument('--who', help="for --press: whose chibi (a session's name; default: the session running this)")
+    p.add_argument('--type', dest='typing', metavar='TEXT', help='your chibi stomps on the field --into names (in the window --in names) and types this into it')
+    p.add_argument('--into', metavar='FIELD', help='for --type: the text field, by name (its label or placeholder)')
+    p.add_argument('--then', nargs='+', metavar='BUTTON', help='for --type: buttons to press after typing (e.g. Send)')
     a = p.parse_args()
     modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery', 'leaves') if getattr(a, m)]
     pid = running_pid()
+    if a.typing is not None:
+        if not a.into or not a.within: print('--type needs --into FIELD and --in TITLE'); sys.exit(2)
+        if any(not (32 <= ord(ch) < 127 or ch == '\n') for ch in a.typing): print('--type: plain ASCII only, for now'); sys.exit(2)
+        a.press, a.field = [a.into], True
     if a.press or a.press_at:
         if not pid: print('ohaiku is not running'); sys.exit(1)
         if a.press_at: at = [['(%d, %d)' % tuple(a.press_at), a.press_at[0] - 20, a.press_at[1] - 20, 40, 40]]
@@ -2685,7 +2753,7 @@ def main():
             W = world.Surfaces()
             mine = [w for w in W.windows() if a.within.lower() in w[6].lower()]
             if mine: subprocess.run(['wmctrl', '-i', '-a', str(mine[-1][0])]); time.sleep(.35)    # bring it to the front first
-            try: at = [list(b) for b in ui.find(a.within, a.press)]
+            try: at = [list(b) for b in ui.find(a.within, a.press, ui.FIELDS if getattr(a, 'field', False) else ui.PRESSABLE)]
             except KeyError as e: print('ohaiku:', e.args[0]); sys.exit(1)
             wins = W.windows()                    # a real click goes to whatever is on top there: make sure that's this window
             for nm, x, y, w, h in at:
@@ -2700,15 +2768,20 @@ def main():
             except (OSError, ValueError, IndexError): break
         tok = '%d%04d' % (os.getpid(), random.randrange(10000))
         import base64
+        if a.typing is not None:
+            at.append(dict(type=a.typing, win=a.within))
+            if a.then:
+                try: at += [list(b) for b in ui.find(a.within, a.then)]
+                except KeyError as e: print('ohaiku:', e.args[0]); sys.exit(1)
         J = dict(who=a.who or anc, at=at, id=tok)
         open(CMDF, 'w').write('press:' + base64.urlsafe_b64encode(json.dumps(J).encode()).decode()); os.kill(pid, signal.SIGUSR1)
         f = _RUN + '.pressed-' + tok
-        for _ in range(int(10 * (6 + 1.2 * len(at)))):
+        for _ in range(int(10 * (6 + 1.2 * len(at) + .2 * len(a.typing or '')))):
             time.sleep(.1)
             if os.path.exists(f):
                 R = json.load(open(f)); os.unlink(f)
                 if R['error']: print('ohaiku:', R['error']); sys.exit(1)
-                print('%s pressed: %s' % (R['who'], ' '.join(n for n, *_ in R['pressed']))); return
+                print('%s pressed: %s' % (R['who'], ' '.join(str(n) for n, *_ in R['pressed']))); return
         print('ohaiku did not finish pressing in time'); sys.exit(1)
     if a.status:
         if not pid: print('ohaiku is not running'); return
