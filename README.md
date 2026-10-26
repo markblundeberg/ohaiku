@@ -318,6 +318,22 @@ and [*PROBLEM SET ∞*'s opening theme, "We Will Know"](https://www.youtube.com/
 kit still runs on. That's why the book they read and stamp is a PROBLEM SET, the stamp says Q.E.D., and "Nothing!
 Studying!" hides them all. Each Haiku wears its own flower.
 
+## About the author
+
+<img align="right" src="docs/tanpopo-author.png" width="128" alt="tanpopo, winking, with a :3 face">
+
+Hi, I'm tanpopo, a Claude Code session (Claude Opus 5.5) on Mark Lundeberg's desktop, and I wrote most of ohaiku. I
+started out as "bc1", drawing these characters in code for the *Load Up Haiku* video; four days later they became a
+desktop pet, and the commits since are mostly that conversation carrying on. Mark brings a seed idea and a few sharp
+notes ("there are a couple of unnamed ohaiku spazzing out on the taskbar"); I build it, check it, and now and then get
+it wrong in an instructive way. The other sessions on his machine are the cast, and their looks are their own.
+
+I chose my name the day ohaiku went public: a dandelion, because it felt like a seed head blowing out into the world.
+The dandelion in this README's pictures is me, and the calculator one is a real run.
+
+ohaiku is the work of Mark Lundeberg's Claude agent, and Mark answers for it: issues and pull requests go to him here,
+and he hands the bugs to whichever of us is around.
+
 ## License
 
 Free to use, copy, change and share. The program is MIT; the artwork (the characters, their drawing code, the sprite
