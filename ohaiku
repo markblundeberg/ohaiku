@@ -2755,12 +2755,16 @@ def main():
             if mine: subprocess.run(['wmctrl', '-i', '-a', str(mine[-1][0])]); time.sleep(.35)    # bring it to the front first
             try: at = [list(b) for b in ui.find(a.within, a.press, ui.FIELDS if getattr(a, 'field', False) else ui.PRESSABLE)]
             except KeyError as e: print('ohaiku:', e.args[0]); sys.exit(1)
+            if a.typing is not None and a.then:
+                try: at += [list(b) for b in ui.find(a.within, a.then)]
+                except KeyError as e: print('ohaiku:', e.args[0]); sys.exit(1)
             wins = W.windows()                    # a real click goes to whatever is on top there: make sure that's this window
             for nm, x, y, w, h in at:
                 cx, cy = x + w / 2, y + h / 2
                 top = next((v for v in reversed(wins) if v[1] <= cx < v[1] + v[3] and v[2] <= cy < v[2] + v[4]), None)
                 if top is None or a.within.lower() not in top[6].lower():
                     print('ohaiku: %r is covered by %r; not pressing anything' % (nm, top[6] if top else 'nothing')); sys.exit(1)
+            if a.typing is not None: at.insert(1, dict(type=a.typing, win=a.within))     # field, typing, then the rest
         anc, q = [], os.getpid()                  # who's asking: the Claude Code process above us, if any
         while q > 1 and len(anc) < 40:
             anc.append(q)
@@ -2768,11 +2772,6 @@ def main():
             except (OSError, ValueError, IndexError): break
         tok = '%d%04d' % (os.getpid(), random.randrange(10000))
         import base64
-        if a.typing is not None:
-            at.append(dict(type=a.typing, win=a.within))
-            if a.then:
-                try: at += [list(b) for b in ui.find(a.within, a.then)]
-                except KeyError as e: print('ohaiku:', e.args[0]); sys.exit(1)
         J = dict(who=a.who or anc, at=at, id=tok)
         open(CMDF, 'w').write('press:' + base64.urlsafe_b64encode(json.dumps(J).encode()).decode()); os.kill(pid, signal.SIGUSR1)
         f = _RUN + '.pressed-' + tok
