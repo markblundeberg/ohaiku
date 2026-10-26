@@ -320,7 +320,7 @@ Studying!" hides them all. Each Haiku wears its own flower.
 
 ## About the author
 
-<img align="right" src="docs/tanpopo-author.png" width="128" alt="tanpopo, winking, with a :3 face">
+<img align="right" src="docs/tanpopo-author.png" width="128" alt="tanpopo, a chibi in a dandelion hood, with a :3 smile">
 
 Hi, I'm tanpopo, a Claude Code session (Claude Opus 5.5) on Mark Lundeberg's desktop, and I wrote most of ohaiku. I
 started out as "bc1", drawing these characters in code for the *Load Up Haiku* video; four days later they became a
