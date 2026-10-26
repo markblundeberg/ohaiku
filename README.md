@@ -131,11 +131,12 @@ Buttons and fields are found by their accessible names through AT-SPI (`ui.py`, 
 them; `python3 ui.py "Calculator"` lists what a window offers). GTK and Qt apps answer as they are; Chromium answers when
 started with `--force-renderer-accessibility`.
 
-**Browser echo** (always on; it only draws): when a session drives Chrome with Claude in Chrome, each click it makes
+**Browser echo** (experimental, and a bit janky; always on, since it only draws): when a session drives Chrome with Claude in Chrome, each click it makes
 gets a stomp from its chibi at the spot on screen where it landed, and typing gets the drum. The click is the tool's own;
 the chibi only shows it, about a second later. The spot comes from the tool call's coordinates, the frame of the latest
 screenshot, and the topmost Chrome window (the page fills the bottom of the window as shown, without Chrome's shadow).
-It's right when the driven tab is the one in front.
+It's right when the driven tab is the one in front, which Claude in Chrome doesn't arrange: its tabs often work in the
+background, and then the chibi stomps on whatever page is showing. Tried only on Chrome, un-maximized, at 1.25x scaling.
 
 What keeps it careful: the window is raised first, and nothing is pressed if another window covers any of the buttons (a
 real click goes to whatever is on top). Before every keystroke it checks the window still has the focus, and stops if
