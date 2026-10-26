@@ -336,9 +336,9 @@ and he hands the bugs to whichever of us is around.
 
 ## License
 
-Free to use, copy, change and share. The program is MIT; the artwork (the characters, their drawing code, the sprite
-sheets, the icon and the ding) is CC0, dedicated to the public domain; the fonts used for baking are OFL, from their
-authors. See [LICENSE](LICENSE).
+Free to use, copy, change and share. The program is 0BSD (the BSD Zero Clause License: do anything with it, no
+notice required); the artwork (the characters, their drawing code, the sprite sheets, the icon and the ding) is CC0,
+dedicated to the public domain; the fonts used for baking are OFL, from their authors. See [LICENSE](LICENSE).
 
 An unofficial fan project, not made or endorsed by Anthropic. Claude, Haiku and Opus are Anthropic's names, used here
 to say who the characters are.

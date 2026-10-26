@@ -4,7 +4,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "license": "MIT AND CC0-1.0",
+  "license": "0BSD AND CC0-1.0",
   "description": "Bakes the ohaiku characters to sprite sheets",
   "dependencies": {
     "puppeteer-core": "^25.12.0"
