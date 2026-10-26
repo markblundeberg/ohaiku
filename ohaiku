@@ -1929,6 +1929,12 @@ class App:
 
     def audience_tick(self, dt):
         T = self.theater
+        gw = T.win.get_window()                   # the theater minimized: its audience goes with it (not left sitting on whatever's below)
+        away = gw is None or bool(gw.get_state() & Gdk.WindowState.ICONIFIED)
+        for c in self.audience:
+            if away and c.win.get_visible(): c.win.hide()
+            elif not away and not c.win.get_visible() and not self.hidden and not self.locked: c.win.show_all()
+        if away: return
         T.tick(dt)
         seats = T.seats(len(self.audience))
         if not seats: return
