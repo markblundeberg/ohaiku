@@ -417,7 +417,7 @@ def to_inspo(recap_text, wants):
             "Nuggets from ohaiku's Peanut Gallery (`~/git/ohaiku`): a row of chibi Claudes, voiced by Haiku, who watch " + HOST + "'s\n"
             "screen and riff, MST3K-style. When a showing ends, Haiku writes a recap; its *Worth keeping* list lands\n"
             "here, one file per day. `wishlist.md` is what the gallery asked to keep or see more of (\"can we get the full\n"
-            "video?\"): fetch what's worth it, into its own `YYYY-MM-DD author` folder in `~/claude-inspo` with a NOTES.md.\n\n"
+            "video?\"): fetch what's worth it, into its own `YYYY-MM-DD author` folder in `~/claude-inspo/gallery/` with a NOTES.md.\n\n"
             "How they looked: still screenshots every several seconds (the whole screen small, the front window sharper), no sound,\n"
             "by Haiku. So these are first impressions from stills, not close study: check before you build on one.\n")
     m = re.search(r'Worth keeping:?\**\s*\n(.*)', recap_text or '', re.S | re.I)
