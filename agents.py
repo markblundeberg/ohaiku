@@ -104,6 +104,7 @@ def _parse(path):
             else: state = 'think'
         elif t == 'system':
             if e.get('subtype') == 'turn_duration': state = 'free'
+    if entry is None: entry = _head_entry(path)    # the tail can be all metadata (artifact monitors, cost-state...)
     parsed = dict(state=state or 'free', tool=tool if state in ('tool', 'ask', 'limit', 'error') else None, until=until, last_tool=last_tool, last_use=last_use, frame=frame, sends=sends, ai=ai, entry=entry, model=model or '', title=title,
                   aname=aname, cwd=cwd)
     _cache[path] = (st.st_mtime, st.st_size, parsed)
@@ -164,6 +165,24 @@ def work_today(path):
 
 _names = {}
 _born = {}
+_entry = {}
+
+
+def _head_entry(path):
+    """how the session was started ('cli', 'sdk-...', ...), from the first entry that says (it doesn't change)"""
+    if path in _entry: return _entry[path]
+    entry = None
+    try:
+        with open(path) as f:
+            for ln, _ in zip(f, range(50)):
+                if '"entrypoint"' not in ln: continue
+                try: entry = json.loads(ln).get('entrypoint')
+                except ValueError: continue
+                if entry: break
+    except OSError:
+        pass
+    if entry: _entry[path] = entry
+    return entry
 
 
 def _first_time(path):
@@ -213,7 +232,9 @@ def live_sessions():
         try:
             d = json.load(open(f)); pid = int(d['pid'])
             os.kill(pid, 0)
-        except (OSError, ValueError, KeyError):
+            if d.get('procStart') and open('/proc/%d/stat' % pid).read().rsplit(')', 1)[1].split()[19] != str(d['procStart']):
+                continue                              # the pid was reused (a record left from before a reboot)
+        except (OSError, ValueError, KeyError, IndexError):
             continue
         out[d.get('sessionId')] = d
     return out
