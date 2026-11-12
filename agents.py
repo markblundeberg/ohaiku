@@ -219,9 +219,11 @@ def _whole_file_names(path):
 
 
 def _look(model, sid, kind):
-    """which sprite: the model's own chibi, a stable variant per session"""
+    """which sprite: a stable variant per session. The chibi stands for the agent, not the exact model: the big
+    models (Opus, Fable, anything new) share the chibi Opus, so a session that switches between them keeps its face;
+    Haiku and Sonnet (and a session whose model isn't known yet) get a Haiku"""
     h = int(hashlib.sha1(sid.encode()).hexdigest(), 16)
-    if 'opus' in model: return 'opus%d' % (h % 8)
+    if model and 'haiku' not in model and 'sonnet' not in model: return 'opus%d' % (h % 8)
     return 'haiku%02d' % (h % 12)
 
 

@@ -54,8 +54,8 @@ uses its `claude` command.
 
 <img align="right" src="docs/tanpopo-read.png" width="112" alt="tanpopo, a chibi in a dandelion hood, reading">
 
-Every Claude Code session on this machine that was active in the last two hours gets a chibi of its own model (chibi
-Opus for Opus, Haiku for Haiku) with its name on a little plate, standing on the bottom edge of the screen and acting out
+Every Claude Code session on this machine that was active in the last two hours gets a chibi (a chibi
+Opus for the big models, Opus and Fable; a Haiku for Haiku and Sonnet) with its name on a little plate, standing on the bottom edge of the screen and acting out
 what it's doing:
 
 | doing | looks like |
