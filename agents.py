@@ -105,6 +105,7 @@ def _parse(path):
         elif t == 'system':
             if e.get('subtype') == 'turn_duration': state = 'free'
     if entry is None: entry = _head_entry(path)    # the tail can be all metadata (artifact monitors, cost-state...)
+    if model is None: model = _last_model(path)    # (and a resumed session's tail has no reply in it yet)
     parsed = dict(state=state or 'free', tool=tool if state in ('tool', 'ask', 'limit', 'error') else None, until=until, last_tool=last_tool, last_use=last_use, frame=frame, sends=sends, ai=ai, entry=entry, model=model or '', title=title,
                   aname=aname, cwd=cwd)
     _cache[path] = (st.st_mtime, st.st_size, parsed)
@@ -166,6 +167,28 @@ def work_today(path):
 _names = {}
 _born = {}
 _entry = {}
+_model = {}
+
+
+def _last_model(path):
+    """the model of the newest reply anywhere in the transcript, reading back from the end (once per file size)"""
+    try: size = os.path.getsize(path)
+    except OSError: return None
+    if _model.get(path, (None,))[0] == size: return _model[path][1]
+    model, n = None, 256 * 1024
+    with open(path, 'rb') as f:
+        while model is None:
+            f.seek(max(0, size - n)); buf = f.read()
+            for ln in reversed(buf.split(b'\n')):
+                if b'"assistant"' not in ln or b'"model"' not in ln: continue
+                try: e = json.loads(ln)
+                except ValueError: continue
+                m = (e.get('message') or {}).get('model') or ''
+                if e.get('type') == 'assistant' and m and not m.startswith('<'): model = m; break
+            if n >= size: break
+            n *= 4
+    _model[path] = (size, model)
+    return model
 
 
 def _head_entry(path):
