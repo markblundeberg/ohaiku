@@ -303,8 +303,8 @@ session it was made for drew for itself and chose to share. It's the one in the 
 a seed clock in place of the star clip, and when a job is done a few seeds lift off and drift away. Copy it into your
 looks folder to try it, or as a start on your own. The other is [`looks/fable.js`](looks/fable.js), which a session
 running Fable drew as Fable's own character: a boy in a duffle coat with a pouch of pebbles, and a jay on his head that
-watches the work (after Aesop's crow and the pitcher). It has its own hair and clothes, so it's the one to copy for a
-character that isn't a chibi Opus. `./ohaiku --look fable` loads one up wearing a baked look, without a session.
+watches the work (after Aesop's crow and the pitcher). He wears the rig's second body, `ohBoy(colours, options)`: short hair, a duffle coat and trousers, which any
+look can take and recolour in one line (the comment above `ohBoy` in `sprites/haiku.js` lists the options). `./ohaiku --look fable` loads one up wearing a baked look, without a session.
 
 ## Showreel
 
