@@ -1551,7 +1551,7 @@ function _hkOpusBody(K, V, yaw, M) {
 // ohBoy(pal, opts) returns the parts of a look (colors, V, clip, hair, torso), to spread into one:
 //   ohLook('name', { base: 3, ...ohBoy({ coat: '#8a4a3a' }, { scarf: false }), head(K, V, c) { ... } })
 // pal: any of HK_BOY's colours. opts: tufts, forelock, nape (the hair's details; all on unless false), scarf (on unless
-// false), bars (three colours striped near the scarf's ends), toggles (on unless false), pouch (a drawstring pouch at
+// false; 'short' for a short one with no loose end, 'knit' for a short knitted one), bars (three colours striped near the scarf's ends), toggles (on unless false), pouch (a drawstring pouch at
 // the hip), tall (overall size, 1). looks/fable.js is the first to wear it.
 const HK_BOY = {
   hair: '#a65f38', hairDeep: '#783c20', hairLight: '#dc9a62', hairLine: '#4c2614',
@@ -1644,8 +1644,10 @@ function ohBoy(pal = {}, o = {}) {
         [.8, .87, .94].forEach((u, i) => { const j = Math.min(n - 1, Math.floor(u * n)), p = sp[j], q = sp[j + 1], d = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1, nx = -(q[1] - p[1]) / d, ny = (q[0] - p[0]) / d; K.ink(nm + i, [[p[0] + nx * w * .42, p[1] + ny * w * .42], [p[0] - nx * w * .42, p[1] - ny * w * .42]], 2.4, { color: cols[i], taper: false, wobble: 0 }); });
       };
       // the scarf's loose end, thrown back over a shoulder (behind the coat)
+      const short = o.scarf === 'short' || o.scarf === 'knit', knit = o.scarf === 'knit';
+      const ribs = (nm, sp, w, from = 0) => { if (!knit) return; for (let j = from + 2; j < sp.length - 1; j += 3) { const p = sp[j], q = sp[j + 1], d = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1, nx = -(q[1] - p[1]) / d, ny = (q[0] - p[0]) / d; K.ink(nm + j, [[p[0] + nx * w * .4, p[1] + ny * w * .4], [p[0] - nx * w * .4, p[1] - ny * w * .4]], 1, { color: FB.scarfDeep, alpha: .8, taper: false }); } };
       const fx0 = back * X(26), fly = bez([fx0, -140], [fx0 + back * 26, -150 - lift * .5], [fx0 + back * 46, -132 - lift + flut], [fx0 + back * 70, -142 - lift - flut], 16);
-      if (scarf) { paint('fsfl', _hkStrip(fly, 14)); bars('fsfb', fly, 14); }
+      if (scarf && !short) { paint('fsfl', _hkStrip(fly, 14)); bars('fsfb', fly, 14); }
       // the coat: a short duffle, straight, with two toggles
       const coat = crSpline([[X(-17), -144], [X(-33), -134], [X(-38), -108], [X(-hw) + sw, hemY], [X(-18) + sw, hemY + 3], [X(18) + sw, hemY + 3], [X(hw) + sw, hemY], [X(38), -108], [X(33), -134], [X(17), -144], [0, -146]], true, 4);
       K.shape('fcoat', coat, FB.coat, { tex: .16, lw: 2.6, shade: gg => { gg.fillStyle = FB.coatShade; gg.globalAlpha = .8; gg.fillRect(X(14), -150, 60, 110); gg.fillRect(-80, hemY - 5, 160, 12); } });
@@ -1671,9 +1673,11 @@ function ohBoy(pal = {}, o = {}) {
       }
       // the scarf: a band, a knot, one end hanging, one end loose in the air
       if (scarf) paint('fsbd', crSpline([[X(-27), -146], [X(27), -146], [X(29), -136], [X(22), -127], [X(-22), -127], [X(-29), -136]], true, 4));
+      if (scarf && knit) for (let j = -4; j <= 4; j++) K.ink('fsbr' + j, [[X(j * 6), -144], [X(j * 6.4), -129]], 1, { color: FB.scarfDeep, alpha: .7, taper: false });
       if (scarf && cy > -.05) {
-        const hang = bez([kx, ky], [kx - sd * 3, ky + 14], [kx + sw * .5 - sd * 1, ky + 30], [kx + sw - sd * 5 + flut * .3, ky + 48], 16);
-        paint('fshg', _hkStrip(hang, 13)); bars('fshb', hang, 13);
+        const hl = short ? .55 : 1, hang = bez([kx, ky], [kx - sd * 3, ky + 14 * hl], [kx + sw * .5 - sd * 1, ky + 30 * hl], [kx + sw - sd * 5 + flut * .3, ky + 48 * hl], 16);
+        paint('fshg', _hkStrip(hang, 13)); bars('fshb', hang, 13); ribs('fshr', hang, 13);
+        if (knit) { const e = hang[hang.length - 1]; for (let j = -2; j <= 2; j++) K.ink('fsfr' + j, [[e[0] + j * 2.6, e[1] - 1], [e[0] + j * 2.9 + flut * .1, e[1] + 6]], 1.2, { color: FB.scarf, taper: false }); }
         K.shape('fskn', polyCircle(kx, ky, 8, 7.5, 12), FB.scarf, { tex: .18, lw: 2.1 });
       }
     },
