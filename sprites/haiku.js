@@ -1370,6 +1370,8 @@ function haikuDrumHead(x, y, s, pose = {}) {
 //   front    last: things held, things in front
 //   readBook(K, b, V)  instead of the open PROBLEM SET   book(K, marks, tex)  instead of the book under the stamp
 //   stampTexture()     the stamp's mark (a 400x200 canvas; use cached())
+//   spawn(g, o)        what it pops out of when it first appears, instead of a bloom (feet at the origin;
+//                      o = { i: frame, t, k: grown 0..1, fade: 1..0 })
 const HK_LOOKS = {};
 function ohLook(name, def) { HK_LOOKS[name] = def; }
 let OH_STATE = null;                  // the ohaiku state being baked (bakeStrips sets it), for looks that change with it

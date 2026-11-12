@@ -73,7 +73,9 @@ function ohStates(who) {
   S.alert = { fps: 12, loop: false, n: 6, f: (g, i) => { H(g, { t: i / 12, move: 'freeze', freeze: 0, beat: 0, expr: 'o' }); ohBang(g, 80, -270, ease.outBack ? ease.outBack(clamp(i / 3)) : clamp(i / 3) * 1.1); } };
   S.spawn = { fps: 12, loop: false, n: 20, f: (g, i) => {
     const t = i / 12, bk = clamp(i / 8);
-    if (i < 15) drawBloom(g, 0, -70 + 30 * (1 - bk), 1.5 * (i < 10 ? 1 : 1 - (i - 10) / 5), bk, isOpus ? base.variant : who, { t, stem: 60 * bk });
+    const own = lk && HK_LOOKS[lk[0]].spawn;       // a look may come out of something of its own (k: grown 0..1, fade: 1..0)
+    if (i < 15 && own) own(g, { i, t, k: bk, fade: i < 10 ? 1 : 1 - (i - 10) / 5 });
+    else if (i < 15) drawBloom(g, 0, -70 + 30 * (1 - bk), 1.5 * (i < 10 ? 1 : 1 - (i - 10) / 5), bk, isOpus ? base.variant : who, { t, stem: 60 * bk });
     if (i >= 8) {        // pops up out of the bloom: grows from the flower's heart, lands with a bounce
       const k = clamp((i - 8) / 5);
       g.save(); g.translate(0, -70 * (1 - k)); g.scale(ease.outBack(k), ease.outBack(k));

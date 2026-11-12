@@ -183,6 +183,22 @@ ohLook('fable', {
     }
   },
 
+  spawn(g, o) {
+    // he comes out of an acorn: it swells and rocks, the cap pops off, and it's gone
+    const K = charKit(g, o.t, 1, { line: HK.line, seed: 'fbac' }), s = 1.5 * ease.outBack(o.k) * o.fade, pop = clamp((o.i - 8) / 4);
+    if (s < .03) return;
+    g.save(); g.rotate(o.i < 8 ? Math.sin(o.i * 1.9) * .09 : 0); g.scale(s, s);
+    const nut = crSpline([[0, 0], [-19, -9], [-27, -34], [-24, -56], [24, -56], [27, -34], [19, -9]], true, 5);
+    K.shape('n', nut, '#c08a48', { tex: .15, lw: 2.6, shade: gg => { gg.fillStyle = '#9a6a30'; gg.globalAlpha = .55; gg.fillRect(7, -70, 40, 80); gg.fillStyle = '#ecc890'; gg.globalAlpha = .7; gg.beginPath(); gg.ellipse(-12, -32, 5, 15, .12, 0, 7); gg.fill(); } });
+    g.translate(pop * 22, -pop * 58); g.rotate(pop * .9); g.scale(1 - pop * .35, 1 - pop * .35);
+    K.ink('st', [[0, -78], [4, -93]], 4.6, { color: '#5e3c20', taper: false });
+    const cap = crSpline([[-31, -50], [-29, -68], [0, -80], [29, -68], [31, -50], [0, -45]], true, 5);
+    K.shape('c', cap, '#7a5230', { tex: .2, lw: 2.6, shade: gg => { gg.fillStyle = '#5e3c20'; gg.globalAlpha = .5; gg.fillRect(8, -90, 40, 60); } });
+    g.save(); P2(g, cap); g.clip();
+    for (let d = -70; d <= 70; d += 11) { K.ink('h' + d, [[d - 20, -84], [d + 20, -44]], 1.1, { color: '#4a2c1c', alpha: .45, taper: false }); K.ink('g' + d, [[d + 20, -84], [d - 20, -44]], 1.1, { color: '#4a2c1c', alpha: .45, taper: false }); }
+    g.restore(); g.restore();
+  },
+
   head(K, V, c) {
     const st = c.state || 'idle', sn = Math.sin(c.yaw), sd = V.side > 0 ? 1 : -1, b = c.b, bt = b - Math.floor(b);
     if (st === 'sleep') {
