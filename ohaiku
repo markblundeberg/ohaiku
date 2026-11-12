@@ -150,11 +150,24 @@ class Strips:
         """a session's own look, if one is baked for its name (share/look-<name>, from ~/.config/ohaiku/looks/; see
         ohLook in sprites/haiku.js), else None. A look baked by the sun (look-<name>-east/-noon/-west) follows the hour"""
         if cls.meta is None: cls.info('haiku00')
-        k = 'look-' + re.sub(r'\s+', '-', re.sub(r"[^\w\s'-]", '', name or '').strip().lower())
-        if k in cls.meta: return k
+        base = re.sub(r'\s+', '-', re.sub(r"[^\w\s'-]", '', name or '').strip().lower())
         h = time.localtime().tm_hour                   # (at night it turns back east, as a young sunflower does)
-        k += '-' + ('noon' if 11 <= h < 15 else 'west' if 15 <= h < 21 else 'east')
-        return k if k in cls.meta else None
+        sun = '-' + ('noon' if 11 <= h < 15 else 'west' if 15 <= h < 21 else 'east')
+        for c in cls.family(base):
+            for k in ('look-' + c, 'look-' + c + sun):
+                if k in cls.meta: return k
+        return None
+
+    @staticmethod
+    def family(base):
+        """the names to try for a look, closest first: the name itself, then without a short prefix ('x · name'), then
+        without its last -parts one at a time ('name-1a2b3c', a short-lived branch of a session), so relatives share one"""
+        out, parts = [base], base.split('-')
+        if len(parts) > 1 and len(parts[0]) <= 2: out.append('-'.join(parts[1:]))
+        for c in list(out):
+            p = c.split('-')
+            while len(p) > 1: p = p[:-1]; out.append('-'.join(p))
+        return list(dict.fromkeys(x for x in out if x))
 
     @classmethod
     def get(cls, who, state):
