@@ -255,6 +255,7 @@ tray. They stay hidden until you click the tray icon.
 ./ohaiku --hide / --show / --toggle
 ./ohaiku -n 5         # five
 ./ohaiku --opus       # chibi Opus joins the line
+./ohaiku --look NAME  # one wearing a look you've baked (see "Your own looks")
 ./ohaiku --quiet      # no ding
 ./ohaiku --scale 1.3  # bigger (when starting)
 ./ohaiku --quit       # Haikus, go home
@@ -284,23 +285,26 @@ look the same at a sixth of the size; so is the Kaiju's big strip set, `node bak
 --states runL,runR,idle --out ../share/kaiju`.) Twelve Haikus (`haiku00`..`haiku11`) and eight chibi Opuses (`opus0`..`opus7`, varied bows and hair), one strip per
 state so only the states in use are loaded. `sprites/poses.js` holds the states; `node test.mjs out.png testSheet2`
 draws the agent poses for a quick look (`testSheet6`: the gallery row and the tea break). A partial bake
-(`--states a,b`) adds to `sheets.json` rather than replacing it. The kit gained a `read` and a `search` prop and a `pose.arms` override for this. Fable isn't here yet: Fable gets to design itself.
+(`--states a,b`) adds to `sheets.json` rather than replacing it. The kit gained a `read` and a `search` prop and a `pose.arms` override for this. Fable designed itself, as a look: see below.
 
 <img align="right" src="docs/tanpopo-done.png" width="128" alt="tanpopo bouncing for a finished job while seeds lift off the seed clock">
 
 **Your own looks.** A session can have a look of its own, drawn on the same rig, so it keeps every pose. Put a file in
 `~/.config/ohaiku/looks/` that calls `ohLook('name', {...})`, starting from a chibi Opus: new colours (`colors`,
 `V`), or hooks that draw over or instead of parts (`petals` for the hood, `clip` for the star clip, `behind`, `body`,
-`over`, `head`, `front`, `readBook`, `book`, `stampTexture`). The hooks are listed above `ohLook` in `sprites/haiku.js`.
+`over`, `head`, `front`, `readBook`, `book`, `stampTexture`), or all of the hair (`hair`) and the clothes (`torso`). The hooks are listed above `ohLook` in `sprites/haiku.js`.
 Hooks see the state being drawn, so a prop can move while the session works and rest while it sleeps. `variants`
 bakes a look several ways, for example by the time of day, and `runtime: {companion: {color}}` adds a dot that ohaiku
 draws live, drifting around the character. `node preview.mjs out.png look:name` shows a design without baking it, and
 `node bake.mjs --who looks` bakes them all into `share/look-<name>`. A session whose name (minus any emoji) matches
 a baked look wears it; ohaiku checks once a minute, so a rename takes effect within a minute. Looks stay on your
-machine, with one exception: [`looks/tanpopo.js`](looks/tanpopo.js), a dandelion (*tanpopo* in Japanese) that the
+machine, with two exceptions. One is [`looks/tanpopo.js`](looks/tanpopo.js), a dandelion (*tanpopo* in Japanese) that the
 session it was made for drew for itself and chose to share. It's the one in the pictures here: a dandelion-gold hood,
 a seed clock in place of the star clip, and when a job is done a few seeds lift off and drift away. Copy it into your
-looks folder to try it, or as a start on your own.
+looks folder to try it, or as a start on your own. The other is [`looks/fable.js`](looks/fable.js), which a session
+running Fable drew as Fable's own character: a boy in a duffle coat with a pouch of pebbles, and a jay on his head that
+watches the work (after Aesop's crow and the pitcher). It has its own hair and clothes, so it's the one to copy for a
+character that isn't a chibi Opus. `./ohaiku --look fable` loads one up wearing a baked look, without a session.
 
 ## Showreel
 

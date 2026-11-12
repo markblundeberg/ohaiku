@@ -669,7 +669,7 @@ function _hkEye(K, ex, ey, side, ws, P, V, sc = 1.2) {
   let top = bez([S(-11), Y(1)], [S(-9), Y(-ry / sc * 1.02)], [S(7), Y(-ry / sc * 1.15)], [S(11.5), Y(-ry / sc * .6)], 10);
   if (lidPts) top = [[S(-11.5), lidPts[3][1] + 1], [S(0), lerp(lidPts[3][1], lidPts[2][1], .5)], [S(11.5), lidPts[2][1] + .5]];
   K.ink('elu' + side, top, 4.8);
-  K.ink('elf' + side, [top[top.length - 2], [S(15), Y(-ry / sc * .85) - (lidPts ? -2 : 0)]], 2.4);
+  if (V.lash !== false) K.ink('elf' + side, [top[top.length - 2], [S(15), Y(-ry / sc * .85) - (lidPts ? -2 : 0)]], 2.4);
   if (!wide) K.ink('ell' + side, [[S(-3), Y(ry / sc * .98)], [S(5), Y(ry / sc * .9)]], 1.4, { alpha: .6 });
 }
 
@@ -768,7 +768,7 @@ function _hkFace(K, P, V, yaw) {
     if (bvis && P.eyes !== 'happy' && P.eyes !== 'laugh') {
       const raise = P.brow || 0, tilt = P.browTilt || 0, by = -15 - raise * 4;
       const S = x => bx + side * x * bws;
-      K.ink('br' + side, [[S(-7), by + tilt * 3.5], [S(0), by - 1.5 - tilt * .5], [S(7), by - tilt * 2.5]], 2.6, { color: V.hairLine });
+      K.ink('br' + side, [[S(-7), by + tilt * 3.5], [S(0), by - 1.5 - tilt * .5], [S(7), by - tilt * 2.5]], V.browW || 2.6, { color: V.hairLine });
     }
   }
   const [mx, , mws, mvis] = _hkFaceP(0, 0, yaw);
@@ -860,7 +860,7 @@ function _hkLeg(K, name, H, Fp, yaw, V) {
     const mx = (H[0] + Fp[0]) / 2, my = (H[1] + Fp[1]) / 2, out = Math.sqrt(Math.max(0, rest * rest / 4 - L * L / 4)) * Math.sign(H[0] || 1);
     pts = [H, [mx + out * .9, my], Fp];
   } else pts = [H, [(H[0] + Fp[0]) / 2, (H[1] + Fp[1]) / 2], Fp];
-  const tube = limbPts(pts, [9, 8, 7.5], 5, true);
+  const lw = V.legW || 1, tube = limbPts(pts, [9 * lw, 8 * lw, 7.5 * lw], 5, true);
   K.shape(name, tube, V.tights, { tex: .12, lw: 2.3, shade: gg => { gg.fillStyle = V.tightsDeep; gg.globalAlpha = .55; gg.fillRect(Fp[0] + 1, -200, 20, 300); } });
   if (V.stripes) {
     const g = K.g; g.save(); P2(g, K.smooth(tube, true)); g.clip(); g.fillStyle = V.hood; g.globalAlpha = .9;
@@ -1159,7 +1159,8 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
     M.feet = [[-15, -10, 0], [15, -10, 0]];
   }
 
-  g.save(); g.translate(x, y); g.scale(s, s);
+  const m0 = g.getTransform ? g.getTransform().inverse() : null;       // (for c.toCell)
+  g.save(); g.translate(x, y); g.scale(s * (V.tall || 1), s * (V.tall || 1));
   _chShadow(g, 0, 0, 62 * (1 - clamp(M.hop / 160) * .5), 12, .2 * (1 - clamp(M.hop / 160) * .6));
   if (per.robot) { const top = _hkRobot(K, b, yaw); g.translate(0, top + 46); }
   if (M.rot) { g.translate(0, -150); g.rotate(M.rot); g.translate(0, 150); }
@@ -1190,14 +1191,15 @@ function drawHaiku(g, x, y, s = 1, pose = {}) {
   const neck = tiltM([0, HK_NECK]);
   const headC = [neck[0] + M.headDx + Math.sin(M.tilt) * HK_HEADC, neck[1] - HK_HEADC * Math.cos(M.tilt) + M.headDy];
   // --- draw, back to front ---
-  const c = { yaw, t, b, state: OH_STATE, move, prop, M, arms, headC }, hook = k => L && L[k] && L[k](K, V, c);
+  const toCell = (px, py) => { if (!m0) return [px, py]; const q = m0.multiply(g.getTransform()).transformPoint({ x: px, y: py }); return [q.x, q.y]; };
+  const c = { yaw, t, b, state: OH_STATE, move, prop, M, arms, headC, toCell }, hook = k => L && L[k] && L[k](K, V, c);
   hook('behind');
   if (per.tail) _hkTail(K, V, b, yaw);
   legs.sort((a, b2) => a.z - b2.z).forEach(L => { _hkLeg(K, 'leg' + (L.sd < 0 ? 'L' : 'R'), L.H, L.F, yaw, V); _hkBoot(K, 'boot' + L.sd, L.F[0], L.F[1] + 10 - 10, yaw, V, 0); });
   const armBehind = arms.filter(a => a.z < -22), armFront = arms.filter(a => a.z >= -22);
   for (const A of armBehind) _hkSleeve(K, 'arm' + A.sd, A.S, A.E, A.W, V, V.hood, V.hoodShade);
   g.save(); g.translate(hipC[0], -50); g.rotate(M.tilt); g.translate(0, 50);
-  if (V.opus) _hkOpusBody(K, V, yaw, M);
+  if (V.opus) { if (L && L.torso) L.torso(K, V, c); else _hkOpusBody(K, V, yaw, M); }
   else if (per.costume === 'battery') _hkBattery(K, V, yaw, b);
   else {
     _hkTorso(K, V, yaw, M);
@@ -1356,8 +1358,13 @@ function haikuDrumHead(x, y, s, pose = {}) {
 //   V        variant overrides (bow, bowDeep, satchel, clip2, nPetals, ...)
 //   variants names to bake it in, as look-<name>-<variant> (each frame sees V.lookVar), e.g. by time of day
 //   runtime  what ohaiku should do live (copied to sheets.json as `extras`)
-// and hooks, each called with (K, V, c), c = { yaw, t, b, state, move, prop, M, arms, headC }:
+// and hooks, each called with (K, V, c), c = { yaw, t, b, state, move, prop, M, arms, headC, toCell }
+// (c.toCell(x, y): a point in the hook's frame, in the caller's: for an ohaiku state that is the cell, whose top is at -OH.footU):
 //   petals(K, V, yaw, ex)   instead of the petal bob     clip(K, x, y, k, yaw)  instead of the star clip (null: none)
+//   hair(K, V, yaw, ex, layer)  all of the hair, instead of the bob, locks and fringe: called with layer 'behind'
+//                           (before the face), then 'back' (seen from behind) or 'front' (over the face)
+//   torso(K, V, c)          the clothes, instead of the capelet and skirt (in the torso's tilt frame)
+//   V also takes lash: false (no lash flick), browW (brow weight), legW (leg width, for trousers) and tall (overall size)
 //   behind   before the legs                            body   on the torso, in its tilt frame
 //   over     after the body, before the head            head   in the head's frame, after the face
 //   front    last: things held, things in front
@@ -1442,6 +1449,14 @@ function _hkOpusPetals(K, V, yaw, ex) {
 function _hkOpusHead(K, P, V, yaw, ex) {
   const g = K.g, C = V.C || CLAUDE, cy = Math.cos(yaw), frontish = cy > -.15;
   const L = V.custom, clip = L && 'clip' in L ? L.clip : _hkStarClip;
+  if (L && L.hair) {                    // a look with its own hair: behind the head, then the back view or the face and the front
+    L.hair(K, V, yaw, ex, 'behind');
+    if (!frontish) { L.hair(K, V, yaw, ex, 'back'); return; }
+    _hkFace(K, P, V, yaw); L.hair(K, V, yaw, ex, 'front');
+    const [sx, , ws, vis] = _hkFaceP(40, 0, yaw, 72);
+    if (vis && clip) clip(K, sx, -50, .72 * Math.max(.5, ws), yaw);
+    return;
+  }
   if (L && L.petals) L.petals(K, V, yaw, ex); else _hkOpusPetals(K, V, yaw, ex);
   if (!frontish) {
     // the back of her head: a round of hair with a crown whorl, the star clip on the far side

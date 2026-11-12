@@ -1373,7 +1373,7 @@ class App:
         self.gallery_on, self.gal_gen, self.gal_cast, self.gal_hist, self.placard = False, 0, [], [], None   # peanut gallery
         self.speeches, self.said, self.gal_skip, self.gal_hide, self.gal_why = [], {}, [], [], 'off'
         self.gal_own, self.gal_next = [], 0.0          # ohaiku's own windows (not a change on screen); when the next line may go
-        for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, 'opus0' if a.opus else None)
+        for i in range(a.n): GLib.timeout_add(int(i * 700) + 1, self.add_pet, Strips.custom(a.look) if a.look else 'opus0' if a.opus else None)
         GLib.timeout_add(1000 // HZ, self.tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda *_: (self.command(), True)[1])
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, lambda *_: (self.quit(), True)[1])
@@ -2688,6 +2688,7 @@ class App:
         for c in cmds:
             if c == 'pet': self.add_pet()
             elif c == 'opus': self.add_pet('opus%d' % random.randrange(8))
+            elif c.startswith('look:') and Strips.custom(c[5:]): self.add_pet(Strips.custom(c[5:]))
             elif c in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'perch', 'hide', 'show', 'toggle'): self.set_mode(c)
             elif c == 'studying': self.study()
             elif c == 'movie': self.movie()
@@ -2781,6 +2782,7 @@ def main():
     p = argparse.ArgumentParser(description='Haiku 5.5 on your desktop.')
     p.add_argument('-n', type=int, default=None, help='how many to load up')
     p.add_argument('--opus', action='store_true', help='a chibi Opus instead')
+    p.add_argument('--look', metavar='NAME', help='one wearing a look you have baked instead (see "Your own looks")')
     p.add_argument('--agents', action='store_true', help='start with just the agents')
     p.add_argument('--no-agents', action='store_true', help='just pets, no agents')
     for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery', 'leaves'): p.add_argument('--' + m, action='store_true')
@@ -2800,6 +2802,7 @@ def main():
     p.add_argument('--into', metavar='FIELD', help='for --type: the text field, by name (its label or placeholder)')
     p.add_argument('--then', nargs='+', metavar='BUTTON', help='for --type: buttons to press after typing (e.g. Send)')
     a = p.parse_args()
+    if a.look and not Strips.custom(a.look): print('no baked look called %r (baked: %s)' % (a.look, ', '.join(sorted(k[5:] for k in Strips.meta if k.startswith('look-'))) or 'none')); sys.exit(2)
     modes = [m for m in ('play', 'follow', 'recess', 'tag', 'bloomcore', 'lemmings', 'ohno', 'perch', 'hide', 'show', 'toggle', 'studying', 'movie', 'snow', 'fly', 'kaiju', 'clippy', 'cascade', 'gallery', 'leaves') if getattr(a, m)]
     pid = running_pid()
     if a.typing is not None:
@@ -2872,10 +2875,10 @@ def main():
         pid, a.agents = None, True
     if pid:                                       # already running: tell it
         cmds = modes[:] + (['surprise:' + a.surprise] if a.surprise else [])
-        if not cmds or a.n or a.opus: cmds += ['opus' if a.opus else 'pet'] * (a.n or 1)
+        if not cmds or a.n or a.opus or a.look: cmds += ['look:' + a.look if a.look else 'opus' if a.opus else 'pet'] * (a.n or 1)
         for c in cmds:
             open(CMDF, 'w').write(c); os.kill(pid, signal.SIGUSR1)
-            time.sleep(.7 if c in ('pet', 'opus') else .15)
+            time.sleep(.7 if c in ('pet', 'opus') or c.startswith('look:') else .15)
         return
     a.n = a.n if a.n is not None else (0 if a.agents else 1)
     if not a.fg:
