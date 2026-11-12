@@ -1364,7 +1364,8 @@ function haikuDrumHead(x, y, s, pose = {}) {
 //   hair(K, V, yaw, ex, layer)  all of the hair, instead of the bob, locks and fringe: called with layer 'behind'
 //                           (before the face), then 'back' (seen from behind) or 'front' (over the face)
 //   torso(K, V, c)          the clothes, instead of the capelet and skirt (in the torso's tilt frame)
-//   V also takes lash: false (no lash flick), browW (brow weight), legW (leg width, for trousers) and tall (overall size)
+//   V also takes lash: false (no lash flick), browW (brow weight), legW (leg width, for trousers), tall (overall size)
+//   and cuff: 'band' (a narrow cuff with the bare hand in front, instead of the big round cuff)
 //   behind   before the legs                            body   on the torso, in its tilt frame
 //   over     after the body, before the head            head   in the head's frame, after the face
 //   front    last: things held, things in front
@@ -1507,6 +1508,12 @@ function _hkOpusSleeve(K, name, S, E, Wp, V) {
   K.shape(name, pts, C.sleeve || C.jacket, { tex: .16, lw: 2.4, shade: gg => { gg.fillStyle = C.sleeveShade || C.jacketShade; gg.globalAlpha = .8; const q = chTr(pts, -5, -4); gg.beginPath(); gg.rect(-3000, -3000, 6000, 6000); gg.moveTo(q[0][0], q[0][1]); for (const v of q) gg.lineTo(v[0], v[1]); gg.closePath(); gg.fill('evenodd'); } });
   // a little mitten hand (thumb bump toward the body) and a clay cuff
   const hx = Wp[0] + ca * 9, hy = Wp[1] + sa * 9;
+  if (V.cuff === 'band') {                // a narrow band at the end of the sleeve, the hand in front of it
+    K.shape(name + 'cf', capsulePts(Wp[0] - ca * 5, Wp[1] - sa * 5, Wp[0] - ca * 1, Wp[1] - sa * 1, 12.8, 12.8), C.trim, { tex: .15, lw: 2 });
+    K.shape(name + 'th', polyCircle(hx - sa * 7, hy + ca * 7, 4.6, 4.6, 10), C.skin, { tex: .06, lw: 2 });
+    K.shape(name + 'h', polyCircle(hx + ca * 2, hy + sa * 2, 10, 10, 16), C.skin, { tex: .06, lw: 2.2, shade: gg => { gg.fillStyle = C.skinShade; gg.globalAlpha = .7; gg.beginPath(); gg.ellipse(hx + 6, hy + 6, 9, 8, 0, 0, 7); gg.fill(); } });
+    return;
+  }
   K.shape(name + 'th', polyCircle(hx - sa * 7, hy + ca * 7, 4.6, 4.6, 10), C.skin, { tex: .06, lw: 2 });
   K.shape(name + 'h', polyCircle(hx, hy, 10.5, 10.5, 16), C.skin, { tex: .06, lw: 2.2, shade: gg => { gg.fillStyle = C.skinShade; gg.globalAlpha = .7; gg.beginPath(); gg.ellipse(hx + 4, hy + 4, 9, 8, 0, 0, 7); gg.fill(); } });
   const cuff = capsulePts(Wp[0] - ca * 6, Wp[1] - sa * 6, Wp[0] + ca * 2, Wp[1] + sa * 2, 12.5, 12.5);
@@ -1551,7 +1558,7 @@ function _hkOpusBody(K, V, yaw, M) {
 // ohBoy(pal, opts) returns the parts of a look (colors, V, clip, hair, torso), to spread into one:
 //   ohLook('name', { base: 3, ...ohBoy({ coat: '#8a4a3a' }, { scarf: false }), head(K, V, c) { ... } })
 // pal: any of HK_BOY's colours. opts: tufts, forelock, nape (the hair's details; all on unless false), scarf (on unless
-// false; 'short' for a short one with no loose end, 'knit' for a short knitted one), bars (three colours striped near the scarf's ends), toggles (on unless false), pouch (a drawstring pouch at
+// false; 'short' for a short one with no loose end, 'knit' for a short knitted one), bars (three colours striped near the scarf's ends), toggles and hood (on unless false), pouch (a drawstring pouch at
 // the hip), tall (overall size, 1). looks/fable.js is the first to wear it.
 const HK_BOY = {
   hair: '#a65f38', hairDeep: '#783c20', hairLight: '#dc9a62', hairLine: '#4c2614',
@@ -1636,7 +1643,7 @@ function ohBoy(pal = {}, o = {}) {
       K.shape('fhip', crSpline([[X(-25), -72], [X(25), -72], [X(27), -42], [0, -40], [X(-27), -42]], true, 3), FB.trouser, { tex: .15, lw: 2.2, shade: gg => { gg.fillStyle = FB.trouserDeep; gg.globalAlpha = .6; gg.fillRect(X(6), -80, 40, 50); } });
       K.ink('ffly', [[0, -56], [0, -42]], 1.3, { alpha: .5 });
       // the hood, lying on his back (only its edge shows from the front)
-      if (cy > -.05) K.shape('fhoodF', crSpline([[X(-34), -140], [X(-22), -152], [X(22), -152], [X(34), -140], [X(24), -132], [X(-24), -132]], true, 4), FB.coat, { tex: .15, lw: 2.4, shade: gg => { gg.fillStyle = FB.lining; gg.beginPath(); gg.ellipse(0, -143, X(24), 7, 0, 0, 7); gg.fill(); } });
+      if (o.hood !== false && cy > -.05) K.shape('fhoodF', crSpline([[X(-34), -140], [X(-22), -152], [X(22), -152], [X(34), -140], [X(24), -132], [X(-24), -132]], true, 4), FB.coat, { tex: .15, lw: 2.4, shade: gg => { gg.fillStyle = FB.lining; gg.beginPath(); gg.ellipse(0, -143, X(24), 7, 0, 0, 7); gg.fill(); } });
       const kx = X(-sd * 15), ky = -134, flut = Math.sin(b * Math.PI) * 4, back = Math.abs(sn) > .3 ? -Math.sign(sn) : -sd, lift = clamp(M.hop / 60) * 16 + Math.abs(sn) * 8;
       const paint = (nm, pts) => K.shape(nm, pts, FB.scarf, { tex: .18, lw: 2.2, shade: gg => { gg.fillStyle = FB.scarfDeep; gg.globalAlpha = .55; const q = chTr(pts, 4, 5); gg.beginPath(); gg.rect(-3000, -3000, 6000, 6000); gg.moveTo(q[0][0], q[0][1]); for (const v of q) gg.lineTo(v[0], v[1]); gg.closePath(); gg.fill('evenodd'); } });
       const bars = (nm, sp, w) => {         // three stripes near each end, if the look gives their colours
@@ -1661,7 +1668,7 @@ function ohBoy(pal = {}, o = {}) {
         K.ink('fpk', [[X(sd * 15), -74], [X(sd * 33), -75]], 1.5, { alpha: .6 });
       } else if (cy < -.05) {
         const hood = crSpline([[X(-28), -144], [X(28), -144], [X(22), -116], [0, -102], [X(-22), -116]], true, 4);
-        K.shape('fhoodB', hood, FB.coat, { tex: .15, lw: 2.4, shade: gg => { gg.fillStyle = FB.coatShade; gg.globalAlpha = .7; gg.beginPath(); gg.ellipse(0, -108, X(26), 12, 0, 0, 7); gg.fill(); } });
+        if (o.hood !== false) K.shape('fhoodB', hood, FB.coat, { tex: .15, lw: 2.4, shade: gg => { gg.fillStyle = FB.coatShade; gg.globalAlpha = .7; gg.beginPath(); gg.ellipse(0, -108, X(26), 12, 0, 0, 7); gg.fill(); } });
         K.ink('fseam', [[0, -100], [sw, hemY + 2]], 1.3, { alpha: .45 });
       }
       // the pebble pouch, tied at his side
