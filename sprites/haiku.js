@@ -1365,7 +1365,8 @@ function haikuDrumHead(x, y, s, pose = {}) {
 //                           (before the face), then 'back' (seen from behind) or 'front' (over the face)
 //   torso(K, V, c)          the clothes, instead of the capelet and skirt (in the torso's tilt frame)
 //   V also takes lash: false (no lash flick), browW (brow weight), legW (leg width, for trousers), tall (overall size)
-//   and cuff: 'band' (a narrow cuff with the bare hand in front, instead of the big round cuff)
+//   and cuff: 'band' (a narrow cuff with the bare hand in front, instead of the big round cuff) or 'rolled'
+//   (shirt sleeves rolled to the elbow, bare forearms)
 //   behind   before the legs                            body   on the torso, in its tilt frame
 //   over     after the body, before the head            head   in the head's frame, after the face
 //   front    last: things held, things in front
@@ -1505,9 +1506,18 @@ function _hkOpusHead(K, P, V, yaw, ex) {
 function _hkOpusSleeve(K, name, S, E, Wp, V) {
   const C = V.C || CLAUDE, a = Math.atan2(Wp[1] - E[1], Wp[0] - E[0]), ca = Math.cos(a), sa = Math.sin(a);
   const pts = limbPts([S, E, Wp], [12.5, 12, 11.5], 6, true);
-  K.shape(name, pts, C.sleeve || C.jacket, { tex: .16, lw: 2.4, shade: gg => { gg.fillStyle = C.sleeveShade || C.jacketShade; gg.globalAlpha = .8; const q = chTr(pts, -5, -4); gg.beginPath(); gg.rect(-3000, -3000, 6000, 6000); gg.moveTo(q[0][0], q[0][1]); for (const v of q) gg.lineTo(v[0], v[1]); gg.closePath(); gg.fill('evenodd'); } });
+  if (V.cuff !== 'rolled') K.shape(name, pts, C.sleeve || C.jacket, { tex: .16, lw: 2.4, shade: gg => { gg.fillStyle = C.sleeveShade || C.jacketShade; gg.globalAlpha = .8; const q = chTr(pts, -5, -4); gg.beginPath(); gg.rect(-3000, -3000, 6000, 6000); gg.moveTo(q[0][0], q[0][1]); for (const v of q) gg.lineTo(v[0], v[1]); gg.closePath(); gg.fill('evenodd'); } });
   // a little mitten hand (thumb bump toward the body) and a clay cuff
   const hx = Wp[0] + ca * 9, hy = Wp[1] + sa * 9;
+  if (V.cuff === 'rolled') {              // shirt sleeves rolled to the elbow: sleeve to a rolled band, bare forearm, bare hand
+    const ea = Math.atan2(E[1] - S[1], E[0] - S[0]);
+    K.shape(name + 'fa', limbPts([E, Wp], [9.5, 9], 6, true), C.skin, { tex: .06, lw: 2.2, shade: gg => { gg.fillStyle = C.skinShade; gg.globalAlpha = .55; gg.beginPath(); gg.ellipse((E[0] + Wp[0]) / 2 + 5, (E[1] + Wp[1]) / 2 + 3, 8, 14, a, 0, 7); gg.fill(); } });
+    K.shape(name, limbPts([S, E], [12.5, 12], 6, true), C.sleeve || C.jacket, { tex: .16, lw: 2.4, shade: gg => { gg.fillStyle = C.sleeveShade || C.jacketShade; gg.globalAlpha = .7; gg.beginPath(); gg.ellipse((S[0] + E[0]) / 2 + 5, (S[1] + E[1]) / 2 + 4, 10, 16, ea, 0, 7); gg.fill(); } });
+    K.shape(name + 'rl', capsulePts(E[0] - Math.cos(ea) * 4, E[1] - Math.sin(ea) * 4, E[0] + Math.cos(ea) * 4, E[1] + Math.sin(ea) * 4, 13.5, 13.5), C.sleeve || C.jacket, { tex: .16, lw: 2.2, shade: gg => { gg.fillStyle = C.sleeveShade || C.jacketShade; gg.globalAlpha = .5; gg.fillRect(E[0] - 20, E[1] + 1, 40, 20); } });
+    K.shape(name + 'th', polyCircle(hx - sa * 7, hy + ca * 7, 4.6, 4.6, 10), C.skin, { tex: .06, lw: 2 });
+    K.shape(name + 'h', polyCircle(hx, hy, 10, 10, 16), C.skin, { tex: .06, lw: 2.2, shade: gg => { gg.fillStyle = C.skinShade; gg.globalAlpha = .7; gg.beginPath(); gg.ellipse(hx + 4, hy + 4, 9, 8, 0, 0, 7); gg.fill(); } });
+    return;
+  }
   if (V.cuff === 'band') {                // a narrow band at the end of the sleeve, the hand in front of it
     K.shape(name + 'cf', capsulePts(Wp[0] - ca * 5, Wp[1] - sa * 5, Wp[0] - ca * 1, Wp[1] - sa * 1, 12.8, 12.8), C.trim, { tex: .15, lw: 2 });
     K.shape(name + 'th', polyCircle(hx - sa * 7, hy + ca * 7, 4.6, 4.6, 10), C.skin, { tex: .06, lw: 2 });
